@@ -2,3 +2,5 @@
 *.a
 *.log
 .vagrant/
+.vscode/
+bin/
