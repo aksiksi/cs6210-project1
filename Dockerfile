@@ -4,5 +4,6 @@ RUN apt-get update && \
     apt-get -y install \
         gcc \
         libc6-dev \
-        make && \
+        make \
+        gdb && \
     rm -rf /var/lib/apt/lists/*

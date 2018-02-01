@@ -4,3 +4,6 @@
 .vagrant/
 .vscode/
 bin/
+.idea/
+CMakeLists.txt
+cmake-build-debug/
