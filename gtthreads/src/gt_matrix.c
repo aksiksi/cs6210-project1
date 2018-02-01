@@ -12,7 +12,6 @@
 
 #include "gt_include.h"
 
-
 #define ROWS 512
 #define COLS ROWS
 #define SIZE COLS
@@ -21,7 +20,7 @@
 #define NUM_GROUPS NUM_CPUS
 #define PER_GROUP_COLS (SIZE/NUM_GROUPS)
 
-#define NUM_THREADS 32
+#define NUM_THREADS 1
 #define PER_THREAD_ROWS (SIZE/NUM_THREADS)
 
 
@@ -150,8 +149,8 @@ int main()
 	uthread_arg_t *uarg;
 	int inx;
 
-
-	gtthread_app_init();
+	kthread_sched_t sched = GT_SCHED_PRIORITY;
+	gtthread_app_init(sched);
 
 	init_matrices();
 

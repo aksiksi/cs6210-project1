@@ -220,7 +220,12 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
 	return(u_obj);
 }
 
-
+/**
+ * Finds the highest priority uthread from current kthread's runqueue.
+ */
+extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_runq) {
+	return NULL;
+}
 
 /* XXX: More work to be done !!! */
 extern gt_spinlock_t uthread_group_penalty_lock;
