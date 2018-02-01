@@ -284,13 +284,13 @@ extern uthread_struct_t *sched_find_best_uthread_group(kthread_runqueue_t *kthre
 	return(u_obj);
 }
 
-#if 0
+#ifdef PQ_DEBUG
 /*****************************************************************************************/
 /* Main Test Function */
 
 runqueue_t active_runqueue, expires_runqueue;
 
-#define MAX_UTHREADS 1000
+#define MAX_UTHREADS 1
 uthread_struct_t u_objs[MAX_UTHREADS];
 
 static void fill_runq(runqueue_t *runq)
@@ -338,7 +338,6 @@ static void change_runq(runqueue_t *from_runq, runqueue_t *to_runq)
 	for(inx=0; inx<MAX_UTHREADS; inx++)
 	{
 		u_obj = &u_objs[inx];
-		switch_runqueue(from_runq, to_runq, u_obj);
 		printf("Uthread (id:%d , prio:%d) moved\n", u_obj->uthread_tid, u_obj->uthread_priority);
 	}
 
