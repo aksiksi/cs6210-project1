@@ -31,7 +31,7 @@ static int uthread_init(uthread_struct_t *u_new);
 /* uthread creation */
 #define UTHREAD_DEFAULT_SSIZE (16 * 1024)
 
-extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid);
+extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid, int credits);
 
 /**********************************************************************/
 /** DEFNITIONS **/
@@ -55,14 +55,14 @@ static int uthread_init(uthread_struct_t *u_new)
 	act.sa_flags = (SA_ONSTACK | SA_RESTART);
 	if(sigaction(SIGUSR2,&act,&oldact))
 	{
-		fprintf(stderr, "uthread sigusr2 install failed !!");
+		fprintf(stderr, "uthread sigusr2 install failed !!\n");
 		return -1;
 	}
 
 	/* Install alternate signal stack (for SIGUSR2) */
 	if(sigaltstack(&(u_new->uthread_stack), &oldstack))
 	{
-		fprintf(stderr, "uthread sigaltstack install failed.");
+		fprintf(stderr, "uthread sigaltstack install failed.\n");
 		return -1;
 	}
 
@@ -90,7 +90,7 @@ static int uthread_init(uthread_struct_t *u_new)
 	sigprocmask(SIG_BLOCK, &set, &oldset);
 	if(sigaction(SIGUSR2,&oldact,NULL))
 	{
-		fprintf(stderr, "uthread sigusr2 revert failed !!");
+		fprintf(stderr, "uthread sigusr2 revert failed !!\n");
 		return -1;
 	}
 
@@ -100,7 +100,7 @@ static int uthread_init(uthread_struct_t *u_new)
 	/* Restore the old stack/signal handling */
 	if(sigaltstack(&oldstack, NULL))
 	{
-		fprintf(stderr, "uthread sigaltstack revert failed.");
+		fprintf(stderr, "uthread sigaltstack revert failed.\n");
 		return -1;
 	}
 
@@ -118,12 +118,12 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	// kthread_block_signal(SIGVTALRM);
 	// kthread_block_signal(SIGUSR1);
 
-#if 0
-	fprintf(stderr, "uthread_schedule invoked !!\n");
-#endif
-
 	k_ctx = kthread_cpu_map[kthread_apic_id()];
 	kthread_runq = &(k_ctx->krunqueue);
+
+	#if DEBUG
+		fprintf(stderr, "uthread_schedule invoked for kthread (%d)!!\n", k_ctx->cpuid);
+	#endif
 
 	if((u_obj = kthread_runq->cur_uthread))
 	{
@@ -202,7 +202,8 @@ static void uthread_context_func(int signo)
 
 	kthread_runq = &(kthread_cpu_map[kthread_apic_id()]->krunqueue);
 
-	printf("..... uthread_context_func .....\n");
+	fprintf(stderr, "..... uthread_context_func .....\n");
+	
 	/* kthread->cur_uthread points to newly created uthread */
 	if(!sigsetjmp(kthread_runq->cur_uthread->uthread_env,0))
 	{
@@ -230,7 +231,7 @@ static void uthread_context_func(int signo)
 
 extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *);
 
-extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid)
+extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid, int credits)
 {
 	kthread_runqueue_t *kthread_runq;
 	uthread_struct_t *u_new;
@@ -247,7 +248,7 @@ extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, 
 	}
 
 	u_new->uthread_state = UTHREAD_INIT;
-	u_new->uthread_priority = DEFAULT_UTHREAD_PRIORITY;
+	u_new->uthread_credits = credits; // Used only by credit scheduler
 	u_new->uthread_gid = u_gid;
 	u_new->uthread_func = u_func;
 	u_new->uthread_arg = u_arg;
@@ -259,17 +260,30 @@ extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, 
 		fprintf(stderr, "uthread stack mem alloc failure !!");
 		return -1;
 	}
-	u_new->uthread_stack.ss_size = UTHREAD_DEFAULT_SSIZE;
 
+	u_new->uthread_stack.ss_size = UTHREAD_DEFAULT_SSIZE;
 
 	{
 		ksched_shared_info_t *ksched_info = &ksched_shared_info;
+
+		// Set correct value for uthread_priority based on scheduler in use
+		if (ksched_info->scheduler == GT_SCHED_PRIORITY) {
+			u_new->uthread_priority = DEFAULT_UTHREAD_PRIORITY;
+		}
+		else if (ksched_info->scheduler == GT_SCHED_CREDIT) {
+			// New threads are UNDER by default
+			u_new->uthread_priority = UTHREAD_CREDIT_UNDER;
+		}
 
 		gt_spin_lock(&ksched_info->ksched_lock);
 		u_new->uthread_tid = ksched_info->kthread_tot_uthreads++;
 		ksched_info->kthread_cur_uthreads++;
 		gt_spin_unlock(&ksched_info->ksched_lock);
 	}
+
+	#ifdef DEBUG
+		fprintf(stderr, "uthread(%d) created successfully\n", u_new->uthread_tid);
+	#endif
 
 	/* XXX: ksched_find_target should be a function pointer */
 	kthread_runq = ksched_find_target(u_new);

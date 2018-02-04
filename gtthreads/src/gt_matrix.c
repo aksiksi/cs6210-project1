@@ -12,7 +12,7 @@
 
 #include "gt_include.h"
 
-#define ROWS 512
+#define ROWS 16
 #define COLS ROWS
 #define SIZE COLS
 
@@ -20,9 +20,8 @@
 #define NUM_GROUPS NUM_CPUS
 #define PER_GROUP_COLS (SIZE/NUM_GROUPS)
 
-#define NUM_THREADS 1
+#define NUM_THREADS 2
 #define PER_THREAD_ROWS (SIZE/NUM_THREADS)
-
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
  * Let T(g, t) be thread 't' in group 'g'. 
@@ -106,9 +105,9 @@ static void * uthread_mulmat(void *p)
 
 #ifdef GT_THREADS
 	cpuid = kthread_cpu_map[kthread_apic_id()]->cpuid;
-	fprintf(stderr, "\nThread(id:%d, group:%d, cpu:%d) started",ptr->tid, ptr->gid, cpuid);
+	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) started\n",ptr->tid, ptr->gid, cpuid);
 #else
-	fprintf(stderr, "\nThread(id:%d, group:%d) started",ptr->tid, ptr->gid);
+	fprintf(stderr, "Thread(id:%d, group:%d) started\n",ptr->tid, ptr->gid);
 #endif
 
 	for(i = start_row; i < end_row; i++)
@@ -117,11 +116,11 @@ static void * uthread_mulmat(void *p)
 				ptr->_C->m[i][j] += ptr->_A->m[i][k] * ptr->_B->m[k][j];
 
 #ifdef GT_THREADS
-	fprintf(stderr, "\nThread(id:%d, group:%d, cpu:%d) finished (TIME : %lu s and %lu us)",
+	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
 			ptr->tid, ptr->gid, cpuid, (tv2.tv_sec - tv1.tv_sec), (tv2.tv_usec - tv1.tv_usec));
 #else
 	gettimeofday(&tv2,NULL);
-	fprintf(stderr, "\nThread(id:%d, group:%d) finished (TIME : %lu s and %lu us)",
+	fprintf(stderr, "Thread(id:%d, group:%d) finished (TIME : %lu s and %lu us)\n",
 			ptr->tid, ptr->gid, (tv2.tv_sec - tv1.tv_sec), (tv2.tv_usec - tv1.tv_usec));
 #endif
 
@@ -150,6 +149,7 @@ int main()
 	int inx;
 
 	kthread_sched_t sched = GT_SCHED_PRIORITY;
+	int credits = 25;
 	gtthread_app_init(sched);
 
 	init_matrices();
@@ -173,7 +173,7 @@ int main()
 		uarg->start_col = (uarg->gid * PER_GROUP_COLS);
 #endif
 
-		uthread_create(&utids[inx], uthread_mulmat, uarg, uarg->gid);
+		uthread_create(&utids[inx], uthread_mulmat, uarg, uarg->gid, credits);
 	}
 
 	gtthread_app_exit();

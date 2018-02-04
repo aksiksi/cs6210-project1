@@ -70,6 +70,8 @@ typedef struct __ksched_shared_info
 	gt_spinlock_t ksched_lock; /* global lock for updating above counters */
 	gt_spinlock_t uthread_init_lock; /* global lock for uthread_init (to serialize signal handling stuff in there) */
 
+	kthread_sched_t scheduler; // Type of scheduler, accessible on uthread creation
+
 	gt_spinlock_t __malloc_lock; /* making malloc thread-safe (check particular glibc to see if needed) */
 	unsigned int reserved[2];
 } ksched_shared_info_t;

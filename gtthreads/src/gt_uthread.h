@@ -13,12 +13,17 @@ typedef unsigned int uthread_group_t;
 #define UTHREAD_CANCELLED 0x08
 #define UTHREAD_DONE 0x10
 
+/* Credit scheduler states */
+#define UTHREAD_CREDIT_UNDER 0x01
+#define UTHREAD_CREDIT_OVER 0x02
+
 /* uthread struct : has all the uthread context info */
 typedef struct uthread_struct
 {
 	
 	int uthread_state; /* UTHREAD_INIT, UTHREAD_RUNNABLE, UTHREAD_RUNNING, UTHREAD_CANCELLED, UTHREAD_DONE */
 	int uthread_priority; /* uthread running priority */
+	int uthread_credits; /* Current credit count (used only in credit scheduler!) */
 	int cpu_id; /* cpu it is currently executing on */
 	int last_cpu_id; /* last cpu it was executing on */
 	
