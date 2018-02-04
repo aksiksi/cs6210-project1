@@ -37,7 +37,6 @@ static void kthread_exit();
 /**********************************************************************/
 /* kthread schedule */
 static inline void ksched_info_init(ksched_shared_info_t *ksched_info, kthread_sched_t sched);
-static void ksched_credit(int);
 static void ksched_priority(int);
 static void ksched_cosched(int);
 extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *);
@@ -85,7 +84,7 @@ static int kthread_handler(void *arg)
 	kthread_init(k_ctx);
 	
 	#if DEBUG
-		fprintf(stderr, "kthread (tid : %u, pid : %u,  cpu : %d, cpu-apic-id %d) ready to run !!\n\n", 
+		fprintf(stderr, "kthread (tid : %u, pid : %u,  cpu : %d, cpu-apic-id %d) ready to run !!\n",
 			k_ctx->tid, k_ctx->pid, k_ctx->cpuid, k_ctx->cpu_apic_id);
 	#endif
 
@@ -106,15 +105,7 @@ static void kthread_init(kthread_context_t *k_ctx)
 	k_ctx->pid = syscall(SYS_getpid);
 	k_ctx->tid = syscall(SYS_gettid);
 
-	if (k_ctx->scheduler == GT_SCHED_CREDIT) {
-		// For credit scheduler
-		k_ctx->kthread_sched_timer = ksched_credit;
-	}
-	else {
-		/* For priority co-scheduling */
-		k_ctx->kthread_sched_timer = ksched_priority;
-	}
-
+    k_ctx->kthread_sched_timer = ksched_priority;
 	k_ctx->kthread_sched_relay = ksched_cosched;
 
 	/* XXX: kthread runqueue balancing (TBD) */
@@ -192,19 +183,13 @@ extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *u_obj)
 	u_obj->cpu_id = kthread_cpu_map[target_cpu]->cpuid;
 	u_obj->last_cpu_id = kthread_cpu_map[target_cpu]->cpuid;
 
-#if 0
-	printf("Target uthread (id:%d, group:%d) : cpu(%d)\n", u_obj->uthread_tid, u_obj->uthread_gid, kthread_cpu_map[target_cpu]->cpuid);
-#endif
+    #if DEBUG
+        fprintf(stderr,
+                "Target uthread (id:%d, group:%d) : cpu(%d)\n",
+                u_obj->uthread_tid, u_obj->uthread_gid, kthread_cpu_map[target_cpu]->cpuid);
+    #endif
 
 	return(&(kthread_cpu_map[target_cpu]->krunqueue));
-}
-
-static void ksched_credit(int signal) {
-	/**
-	 * Credit scheduler callback triggered.
-	 * 
-	 * TODO
-	 */
 }
 
 static void ksched_priority(int signo)
@@ -226,7 +211,10 @@ static void ksched_priority(int signo)
 	KTHREAD_PRINT_SCHED_DEBUGINFO(cur_k_ctx, "VTALRM");
 
 	#if DEBUG
+    if (cur_k_ctx->scheduler == GT_SCHED_PRIORITY)
 		fprintf(stderr, "kthread(%d) entered priority scheduler!\n", cur_k_ctx->cpuid);
+    else
+        fprintf(stderr, "kthread(%d) entered credit scheduler!\n", cur_k_ctx->cpuid);
 	#endif
 
 	/* Relay the signal to all other virtual processors(kthreads) */
@@ -352,7 +340,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 
 	/* Num of logical processors (cpus/cores) */
 	#if DEBUG
-	num_cpus = 4;
+	num_cpus = 2;
 	fprintf(stderr, "Number of cores : %d\n", num_cpus);
 	#else
 	num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);

@@ -1,6 +1,8 @@
 #ifndef __GT_UTHREAD_H
 #define __GT_UTHREAD_H
 
+#include <time.h>
+
 /* User-level thread implementation (using alternate signal stacks) */
 
 typedef unsigned int uthread_t;
@@ -17,6 +19,8 @@ typedef unsigned int uthread_group_t;
 #define UTHREAD_CREDIT_UNDER 0x01
 #define UTHREAD_CREDIT_OVER 0x02
 
+#define UTHREAD_DEFAULT_CREDITS 25
+
 /* uthread struct : has all the uthread context info */
 typedef struct uthread_struct
 {
@@ -31,6 +35,11 @@ typedef struct uthread_struct
 	uthread_group_t uthread_gid; /* thread group id  */
 	int (*uthread_func)(void*);
 	void *uthread_arg;
+
+    clock_t init_time;
+    clock_t runnable_time;
+    clock_t running_time;
+    clock_t done_time;
 
 	void *exit_status; /* exit status */
 	int reserved1;

@@ -12,7 +12,7 @@
 
 #include "gt_include.h"
 
-#define ROWS 16
+#define ROWS 512
 #define COLS ROWS
 #define SIZE COLS
 
@@ -148,7 +148,7 @@ int main()
 	uthread_arg_t *uarg;
 	int inx;
 
-	kthread_sched_t sched = GT_SCHED_PRIORITY;
+	kthread_sched_t sched = GT_SCHED_CREDIT;
 	int credits = 25;
 	gtthread_app_init(sched);
 
@@ -174,6 +174,8 @@ int main()
 #endif
 
 		uthread_create(&utids[inx], uthread_mulmat, uarg, uarg->gid, credits);
+
+        credits += 25;
 	}
 
 	gtthread_app_exit();

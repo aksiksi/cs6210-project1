@@ -187,9 +187,14 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
 	runq = kthread_runq->active_runq;
 
 	kthread_runq->kthread_runqlock.holder = 0x04;
+
 	if(!(runq->uthread_mask))
 	{ /* No jobs in active. switch runqueue */
-		assert(!runq->uthread_tot);
+        #if 0
+        fprintf(stderr, "Switched the runqueues in kthread(%d)\n", kthread_cpu_map[kthread_apic_id()]->cpuid);
+        #endif
+
+        assert(!runq->uthread_tot);
 		kthread_runq->active_runq = kthread_runq->expires_runq;
 		kthread_runq->expires_runq = runq;
 
