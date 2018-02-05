@@ -196,6 +196,9 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
         fprintf(stderr, "Switched the runqueues in kthread(%d)\n", k_ctx->cpuid);
         #endif
 
+        // TODO: Look for UNDER uthreads on *other* kthreads
+        // Remove the runqueue switching behavior with credit sched
+
         assert(!runq->uthread_tot);
 		kthread_runq->active_runq = kthread_runq->expires_runq;
 		kthread_runq->expires_runq = runq;

@@ -148,7 +148,7 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
             else
                 u_obj->uthread_priority = UTHREAD_CREDIT_UNDER;
 
-            #if DEBUG
+            #if 0
             fprintf(stderr, "Deducted %d credits from uthread(%d) -- used %f\n",
                     credit_penalty,
                     u_obj->uthread_tid, used_time);
@@ -237,7 +237,7 @@ static void uthread_context_func(int signo)
 
 	kthread_runq = &(kthread_cpu_map[kthread_apic_id()]->krunqueue);
 
-    #if DEBUG
+    #if 0
     fprintf(stderr, "..... uthread_context_func (STATE=%d, T=%d) .....\n",
             kthread_runq->cur_uthread->uthread_state,
             (int)clock());
@@ -252,7 +252,7 @@ static void uthread_context_func(int signo)
 		assert(kthread_runq->cur_uthread->uthread_state == UTHREAD_INIT);
 		kthread_runq->cur_uthread->uthread_state = UTHREAD_RUNNABLE;
         kthread_runq->cur_uthread->runnable_time = clock();
-        #if DEBUG
+        #if 0
         fprintf(stderr, "..... uthread_context_func (STATE=%d, T=%d) .....\n",
                 kthread_runq->cur_uthread->uthread_state,
                 (int)clock());
@@ -264,7 +264,7 @@ static void uthread_context_func(int signo)
 	cur_uthread = kthread_runq->cur_uthread;
 	assert(cur_uthread->uthread_state == UTHREAD_RUNNING);
 
-    #if DEBUG
+    #if 0
         fprintf(stderr, "..... uthread_context_func (STATE=%d, T=%d) .....\n",
                 kthread_runq->cur_uthread->uthread_state,
                 (int)clock());

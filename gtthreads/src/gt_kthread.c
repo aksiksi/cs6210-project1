@@ -37,6 +37,7 @@ static void kthread_exit();
 /**********************************************************************/
 /* kthread schedule */
 static inline void ksched_info_init(ksched_shared_info_t *ksched_info, kthread_sched_t sched);
+void update_credit_balances(kthread_context_t *k_ctx);
 static void ksched_priority(int);
 static void ksched_cosched(int);
 extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *);
@@ -192,6 +193,10 @@ extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *u_obj)
 	return(&(kthread_cpu_map[target_cpu]->krunqueue));
 }
 
+void update_credit_balances(kthread_context_t *k_ctx) {
+
+}
+
 static void ksched_priority(int signo)
 {
 	/* [1] Tries to find the next schedulable uthread.
@@ -221,7 +226,7 @@ static void ksched_priority(int signo)
 	{
 		/* XXX: We can avoid the last check (tmp to cur) by
 		 * temporarily marking cur as DONE. But chuck it !! */
-		if((tmp_k_ctx = kthread_cpu_map[inx]) && (tmp_k_ctx != cur_k_ctx))
+		if ((tmp_k_ctx = kthread_cpu_map[inx]) && (tmp_k_ctx != cur_k_ctx))
 		{
 			if(tmp_k_ctx->kthread_flags & KTHREAD_DONE)
 				continue;
@@ -230,6 +235,11 @@ static void ksched_priority(int signo)
 		}
 	}
 
+    // Perform credit updates for kthread0
+    if (cur_k_ctx->scheduler == GT_SCHED_CREDIT)
+        update_credit_balances(cur_k_ctx);
+
+    // TODO: Change handler for credit scheduler
 	uthread_schedule(&sched_find_best_uthread);
 
 	// kthread_unblock_signal(SIGVTALRM);
@@ -263,9 +273,13 @@ static void ksched_cosched(int signal)
 
 	#if DEBUG
 		fprintf(stderr, "kthread(%d) received the USR1 signal!\n", cur_k_ctx->cpuid);
-	#endif
+    #endif
 
-	// TODO: maybe check for scheduler here? uthread selection handler could change
+    // Perform credit balance update for current kthread
+    if (cur_k_ctx->scheduler == GT_SCHED_CREDIT)
+        update_credit_balances(cur_k_ctx);
+
+	// TODO: Change handler for credit scheduler
 	uthread_schedule(&sched_find_best_uthread);
 
 	// kthread_unblock_signal(SIGVTALRM);
@@ -302,8 +316,10 @@ static void gtthread_app_start(void *arg)
 			/* XXX: gtthread app cleanup has to be done. */
 			continue;
 		}
-		
-		uthread_schedule(&sched_find_best_uthread);
+
+        // Only perform eager scheduling in PRIORITY mode!
+        if (k_ctx->scheduler == GT_SCHED_PRIORITY)
+		    uthread_schedule(&sched_find_best_uthread);
 	}
 	
 	kthread_exit();

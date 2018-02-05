@@ -76,6 +76,7 @@ extern void kthread_init_runqueue(kthread_runqueue_t *kthread_runq);
 
 /* Find the highest priority uthread.
  * Called by kthread handling VTALRM. */
+extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_runq);
 extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_runq);
 
 /* Find the highest priority uthread from uthread_group u_gid.
