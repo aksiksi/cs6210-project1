@@ -201,7 +201,6 @@ static void ksched_priority(int signo)
 	 * [5] Relays the scheduling signal to other kthreads. 
 	 * [RETURN] */
 	kthread_context_t *cur_k_ctx, *tmp_k_ctx;
-	pid_t pid;
 	int inx;
 
 	// kthread_block_signal(SIGVTALRM);
@@ -339,12 +338,8 @@ extern void gtthread_app_init(kthread_sched_t sched)
 	kthread_install_sighandler(SIGUSR1, k_ctx_main->kthread_sched_relay);
 
 	/* Num of logical processors (cpus/cores) */
-	#if DEBUG
-	num_cpus = 2;
+    num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
 	fprintf(stderr, "Number of cores : %d\n", num_cpus);
-	#else
-	num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
-	#endif
 
 	/* kthreads (virtual processors) on all other logical processors */
 	for(inx=1; inx<num_cpus; inx++)

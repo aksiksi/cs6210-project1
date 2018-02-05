@@ -188,15 +188,38 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
 
 	kthread_runq->kthread_runqlock.holder = 0x04;
 
+    kthread_context_t *k_ctx = kthread_cpu_map[kthread_apic_id()];
+
 	if(!(runq->uthread_mask))
 	{ /* No jobs in active. switch runqueue */
         #if 0
-        fprintf(stderr, "Switched the runqueues in kthread(%d)\n", kthread_cpu_map[kthread_apic_id()]->cpuid);
+        fprintf(stderr, "Switched the runqueues in kthread(%d)\n", k_ctx->cpuid);
         #endif
 
         assert(!runq->uthread_tot);
 		kthread_runq->active_runq = kthread_runq->expires_runq;
 		kthread_runq->expires_runq = runq;
+
+        // Refresh credit counts for all uthreads in the now active runqueue
+        if (k_ctx->scheduler == GT_SCHED_CREDIT) {
+            // Get head of queue
+            u_head = &kthread_runq->active_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
+            uthread_struct_t *u_thread = TAILQ_FIRST(u_head);
+
+            // Iterate over uthreads in the queue
+            while (u_thread != NULL) {
+                // Revert credit count to the original amount
+                u_thread->uthread_credits = u_thread->uthread_original_credits;
+
+                #if 0
+                fprintf(stderr, "CPU: %d, UTHREAD: %d, CREDITS: %d\n",
+                        k_ctx->cpuid, u_thread->uthread_tid, u_thread->uthread_credits);
+                #endif
+
+                // Get next uthread in queue
+                u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+            }
+        }
 
 		runq = kthread_runq->expires_runq;
 		if(!runq->uthread_mask)
@@ -219,8 +242,9 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
 	__rem_from_runqueue(runq, u_obj);
 
 	gt_spin_unlock(&(kthread_runq->kthread_runqlock));
-#if 0
-	printf("cpu(%d) : sched best uthread(id:%d, group:%d)\n", u_obj->cpu_id, u_obj->uthread_tid, u_obj->uthread_gid);
+#if DEBUG
+	fprintf(stderr, "kthread(%d) : sched best uthread(id:%d, group:%d)\n",
+            u_obj->cpu_id, u_obj->uthread_tid, u_obj->uthread_gid);
 #endif
 	return(u_obj);
 }
@@ -300,7 +324,7 @@ extern uthread_struct_t *sched_find_best_uthread_group(kthread_runqueue_t *kthre
 
 runqueue_t active_runqueue, expires_runqueue;
 
-#define MAX_UTHREADS 1
+#define MAX_UTHREADS 4
 uthread_struct_t u_objs[MAX_UTHREADS];
 
 static void fill_runq(runqueue_t *runq)
@@ -330,11 +354,11 @@ static void print_runq_stats(runqueue_t *runq, char *runq_str)
 	printf("uthreads details - (tot:%d , mask:%x)\n", runq->uthread_tot, runq->uthread_mask);
 	printf("******************************************************\n");
 	printf("uthread priority details : \n");
-	for(inx=0; inx<MAX_UTHREAD_PRIORITY; inx++)
+	for(inx=0; inx<MAX_UTHREADS; inx++)
 		printf("uthread priority (%d) - (tot:%d)\n", inx, runq->uthread_prio_tot[inx]);
 	printf("******************************************************\n");
 	printf("uthread group details : \n");
-	for(inx=0; inx<MAX_UTHREAD_GROUPS; inx++)
+	for(inx=0; inx<MAX_UTHREADS; inx++)
 		printf("uthread group (%d) - (tot:%d , mask:%x)\n", inx, runq->uthread_group_tot[inx], runq->uthread_group_mask[inx]);
 	printf("******************************************************\n");
 	return;
@@ -386,11 +410,6 @@ int main()
 	print_runq_stats(active_runq, "ACTIVE");
 	print_runq_stats(expires_runq, "EXPIRES");
 	change_runq(active_runq, expires_runq);
-	print_runq_stats(active_runq, "ACTIVE");
-	print_runq_stats(expires_runq, "EXPIRES");
-	empty_runq(expires_runq);
-	print_runq_stats(active_runq, "ACTIVE");
-	print_runq_stats(expires_runq, "EXPIRES");
 	
 	return 0;
 }

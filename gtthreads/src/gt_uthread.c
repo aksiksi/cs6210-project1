@@ -206,7 +206,8 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	}
 
 	kthread_runq->cur_uthread = u_obj;
-	if((u_obj->uthread_state == UTHREAD_INIT) && (uthread_init(u_obj)))
+
+    if((u_obj->uthread_state == UTHREAD_INIT) && (uthread_init(u_obj)))
 	{
 		fprintf(stderr, "uthread_init failed on kthread(%d)\n", k_ctx->cpuid);
 		exit(0);
@@ -301,6 +302,7 @@ extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, 
 
 	u_new->uthread_state = UTHREAD_INIT;
     u_new->init_time = clock();
+    u_new->uthread_original_credits = credits;
 	u_new->uthread_credits = credits; // Used only by credit scheduler
 	u_new->uthread_gid = u_gid;
 	u_new->uthread_func = u_func;

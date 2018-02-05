@@ -16,11 +16,9 @@
 #define COLS ROWS
 #define SIZE COLS
 
-#define NUM_CPUS 2
-#define NUM_GROUPS NUM_CPUS
-#define PER_GROUP_COLS (SIZE/NUM_GROUPS)
+#define NUM_GROUPS 1
 
-#define NUM_THREADS 2
+#define NUM_THREADS 16
 #define PER_THREAD_ROWS (SIZE/NUM_THREADS)
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
@@ -143,12 +141,26 @@ static void init_matrices()
 uthread_arg_t uargs[NUM_THREADS];
 uthread_t utids[NUM_THREADS];
 
-int main()
+int main(int argc, char **argv)
 {
+    kthread_sched_t sched;
+
+    // Get scheduler to use
+    if (argc == 2) {
+        long v = strtol(argv[1], NULL, 10);
+
+        if (v == 0) sched = GT_SCHED_PRIORITY;
+        else sched = GT_SCHED_CREDIT;
+    } else {
+        printf("Usage: matrix [0=PRIORITY/1=CREDIT]\n");
+        exit(0);
+    }
+
+    printf("%d", sched);
+
 	uthread_arg_t *uarg;
 	int inx;
 
-	kthread_sched_t sched = GT_SCHED_CREDIT;
 	int credits = 25;
 	gtthread_app_init(sched);
 
@@ -174,8 +186,6 @@ int main()
 #endif
 
 		uthread_create(&utids[inx], uthread_mulmat, uarg, uarg->gid, credits);
-
-        credits += 25;
 	}
 
 	gtthread_app_exit();
