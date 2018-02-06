@@ -16,9 +16,7 @@
 #define COLS ROWS
 #define SIZE COLS
 
-#define NUM_GROUPS 1
-
-#define NUM_THREADS 16
+#define NUM_THREADS 1
 #define PER_THREAD_ROWS (SIZE/NUM_THREADS)
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
@@ -177,7 +175,7 @@ int main(int argc, char **argv)
 
 		uarg->tid = inx;
 
-		uarg->gid = (inx % NUM_GROUPS);
+		uarg->gid = 0;
 
 		uarg->start_row = (inx * PER_THREAD_ROWS);
 #ifdef GT_GROUP_SPLIT

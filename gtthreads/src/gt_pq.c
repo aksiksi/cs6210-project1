@@ -196,33 +196,9 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
         fprintf(stderr, "Switched the runqueues in kthread(%d)\n", k_ctx->cpuid);
         #endif
 
-        // TODO: Look for UNDER uthreads on *other* kthreads
-        // Remove the runqueue switching behavior with credit sched
-
         assert(!runq->uthread_tot);
 		kthread_runq->active_runq = kthread_runq->expires_runq;
 		kthread_runq->expires_runq = runq;
-
-        // Refresh credit counts for all uthreads in the now active runqueue
-        if (k_ctx->scheduler == GT_SCHED_CREDIT) {
-            // Get head of queue
-            u_head = &kthread_runq->active_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
-            uthread_struct_t *u_thread = TAILQ_FIRST(u_head);
-
-            // Iterate over uthreads in the queue
-            while (u_thread != NULL) {
-                // Revert credit count to the original amount
-                u_thread->uthread_credits = u_thread->uthread_original_credits;
-
-                #if 0
-                fprintf(stderr, "CPU: %d, UTHREAD: %d, CREDITS: %d\n",
-                        k_ctx->cpuid, u_thread->uthread_tid, u_thread->uthread_credits);
-                #endif
-
-                // Get next uthread in queue
-                u_thread = TAILQ_NEXT(u_thread, uthread_runq);
-            }
-        }
 
 		runq = kthread_runq->expires_runq;
 		if(!runq->uthread_mask)
@@ -252,11 +228,150 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
 	return(u_obj);
 }
 
+uthread_struct_t *credit_find_best_uthread_single(kthread_runqueue_t *kthread_runq) {
+    uthread_head_t *u_head;
+    uthread_struct_t *u_thread;
+    runqueue_t *active_runq, *expires_runq;
+    gt_spinlock_t *lock = &(kthread_runq->kthread_runqlock);
+
+    active_runq = kthread_runq->active_runq;
+    expires_runq = kthread_runq->expires_runq;
+
+    // No uthreads in active queue
+    if (!active_runq->uthread_tot) {
+        // No uthreads in active runq -> bring first uthread from expired runqueue with UNDER
+        // Get head of queue
+        u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
+        u_thread = TAILQ_FIRST(u_head);
+
+        // Iterate over uthreads in the expires queue
+        while (u_thread != NULL) {
+            if (u_thread->uthread_priority == UTHREAD_CREDIT_UNDER) {
+                gt_spin_lock(lock);
+                kthread_runq->kthread_runqlock.holder = 0x04;
+
+                // Remove from expired queue
+                __rem_from_runqueue(kthread_runq->expires_runq, u_thread);
+
+                // Remove spinlock
+                gt_spin_unlock(lock);
+
+                return u_thread;
+            }
+
+            // Get next uthread in queue
+            u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+        }
+
+        return NULL;
+    }
+
+    // Take the first uthread on the active queue, remove, and return it
+    u_head = &active_runq->prio_array[UTHREAD_CREDIT_UNDER].group[0];
+    u_thread = TAILQ_FIRST(u_head);
+
+    gt_spin_lock(lock);
+    kthread_runq->kthread_runqlock.holder = 0x04;
+    __rem_from_runqueue(active_runq, u_thread);
+    gt_spin_unlock(lock);
+
+    return u_thread;
+}
+
 /**
  * Finds the highest priority uthread from current kthread's runqueue.
  */
 extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_runq) {
-	return NULL;
+    uthread_head_t *u_head;
+    uthread_struct_t *u_thread;
+    runqueue_t *active_runq, *expires_runq;
+    gt_spinlock_t *lock = &(kthread_runq->kthread_runqlock);
+
+    active_runq = kthread_runq->active_runq;
+    expires_runq = kthread_runq->expires_runq;
+
+    kthread_context_t *k_ctx = kthread_cpu_map[kthread_apic_id()];
+
+    // No uthreads in active queue
+    if (!active_runq->uthread_tot) {
+        // No uthreads in active runq -> bring first uthread from expired runqueue with UNDER
+        // Get head of queue
+        u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
+        u_thread = TAILQ_FIRST(u_head);
+
+        // Iterate over uthreads in the expires queue
+        while (u_thread != NULL) {
+            if (u_thread->uthread_priority == UTHREAD_CREDIT_UNDER) {
+                gt_spin_lock(lock);
+                kthread_runq->kthread_runqlock.holder = 0x04;
+
+                // Remove from expired queue
+                __rem_from_runqueue(kthread_runq->expires_runq, u_thread);
+
+                // Remove spinlock
+                gt_spin_unlock(lock);
+
+                return u_thread;
+            }
+
+            // Get next uthread in queue
+            u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+        }
+
+        // At this point, NO UNDER UTHREADS LEFT IN EITHER QUEUE!
+        // Perform inter-kthread migration!
+        kthread_context_t *temp_k_ctx;
+        int inx;
+
+        for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+            // Iterate over all OTHER kthreads
+            if ((temp_k_ctx = kthread_cpu_map[inx]) && temp_k_ctx != k_ctx) {
+                // Perform a recursive call!
+                if ((u_thread = credit_find_best_uthread_single(&temp_k_ctx->krunqueue))) {
+                    fprintf(stderr, "kthread(%d) migrated uthread(%d) from kthread(%d)!\n", k_ctx->cpuid,
+                            u_thread->uthread_tid, temp_k_ctx->cpuid);
+
+                    return u_thread;
+                }
+            }
+        }
+
+        gt_spinlock_t *temp_lock;
+
+        // If no UNDER uthreads ANYWHERE, let's run one of our (or someone else's) expired uthreads!
+        for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+            temp_k_ctx = kthread_cpu_map[inx];
+
+            if (temp_k_ctx == NULL)
+                continue;
+
+            temp_lock = &temp_k_ctx->krunqueue.kthread_runqlock;
+
+            // Get head elem
+            expires_runq = temp_k_ctx->krunqueue.expires_runq;
+            u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
+            u_thread = TAILQ_FIRST(u_head);
+
+            // If valid, remove it and return
+            if (u_thread != NULL) {
+                rem_from_runqueue(expires_runq, temp_lock, u_thread);
+                return u_thread;
+            }
+        }
+
+        return NULL;
+    }
+
+    // Take the first uthread on the active queue, remove, and return it
+    u_head = &active_runq->prio_array[UTHREAD_CREDIT_UNDER].group[0];
+    u_thread = TAILQ_FIRST(u_head);
+
+    gt_spin_lock(lock);
+    kthread_runq->kthread_runqlock.holder = 0x04;
+    __rem_from_runqueue(active_runq, u_thread);
+    gt_spin_unlock(lock);
+
+	return u_thread;
 }
 
 /* XXX: More work to be done !!! */

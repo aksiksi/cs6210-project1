@@ -121,9 +121,9 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	k_ctx = kthread_cpu_map[kthread_apic_id()];
 	kthread_runq = &(k_ctx->krunqueue);
 
-	#if 0
-		fprintf(stderr, "uthread_schedule invoked for kthread (%d)!!\n", k_ctx->cpuid);
-	#endif
+    #if 0
+    fprintf(stderr, "kthread(%d) has entered!\n", k_ctx->cpuid);
+    #endif
 
 	if((u_obj = kthread_runq->cur_uthread))
 	{
@@ -148,14 +148,14 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
             else
                 u_obj->uthread_priority = UTHREAD_CREDIT_UNDER;
 
-            #if 0
+            #if DEBUG
             fprintf(stderr, "Deducted %d credits from uthread(%d) -- used %f\n",
                     credit_penalty,
                     u_obj->uthread_tid, used_time);
             #endif
         }
 		
-		if(u_obj->uthread_state & (UTHREAD_DONE | UTHREAD_CANCELLED))
+		if (u_obj->uthread_state & (UTHREAD_DONE | UTHREAD_CANCELLED))
 		{
 			/* XXX: Inserting uthread into zombie queue is causing improper
 			 * cleanup/exit of uthread (core dump) */
@@ -178,11 +178,13 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 			u_obj->uthread_state = UTHREAD_RUNNABLE;
 
             // If over credits, add to expired/over runqueue
-            // Otherwise, put it back at the the *tail* of the active runqueue
+            // Otherwise, put it back at the *tail* of the active runqueue
             if (u_obj->uthread_priority == UTHREAD_CREDIT_OVER)
 			    add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
             else
                 add_to_runqueue(kthread_runq->active_runq, &(kthread_runq->kthread_runqlock), u_obj);
+
+            fprintf(stderr, "Returning uthread(%d) to queue\n", u_obj->uthread_tid);
 
 			/* XXX: Save the context (signal mask not saved) */
 			if(sigsetjmp(u_obj->uthread_env, 0))
@@ -191,7 +193,7 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	}
 
 	/* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
-	if(!(u_obj = kthread_best_sched_uthread(kthread_runq)))
+	if (!(u_obj = kthread_best_sched_uthread(kthread_runq)))
 	{
 		/* Done executing all uthreads. Return to main */
 		/* XXX: We can actually get rid of KTHREAD_DONE flag */
@@ -217,8 +219,8 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
     u_obj->running_time = clock();
 	
 	/* Re-install the scheduling signal handlers */
-	kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
-	kthread_install_sighandler(SIGUSR1, k_ctx->kthread_sched_relay);
+//	kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
+//	kthread_install_sighandler(SIGUSR1, k_ctx->kthread_sched_relay);
 
 	/* Jump to the selected uthread context */
 	siglongjmp(u_obj->uthread_env, 1);
