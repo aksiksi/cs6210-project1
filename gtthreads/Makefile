@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -g -O0 -DDEBUG=1
+CFLAGS = -O3 -DDEBUG=0
 LDFLAGS = 
 LIBS = .
 SRC = src/gt_kthread.c src/gt_uthread.c src/gt_pq.c src/gt_signal.c src/gt_spinlock.c

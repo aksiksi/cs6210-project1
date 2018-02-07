@@ -12,7 +12,7 @@
 
 #include "gt_include.h"
 
-#define NUM_THREADS 16
+#define NUM_THREADS 128
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
  * Let T(g, t) be thread 't' in group 'g'. 
@@ -131,8 +131,10 @@ static void init_matrices()
 }
 
 void free_matrix(matrix_t *m) {
-    free(m->arr);
-    free(m);
+	if (m) {
+		free(m->arr);
+    	free(m);
+	}
 }
 
 static void cleanup_matrices() {
@@ -194,24 +196,26 @@ int main(int argc, char **argv)
             // For each size
             size = matrix_sizes[j];
 
-            // TODO
-            for (k = 0; k < (NUM_THREADS/8); k++);
+            // Create 8 threads for each class of (credits, size)
+            for (k = 0; k < (NUM_THREADS/16); k++) {
+				input_matrices[idx] = generate_matrix(size, 1);
+				output_matrices[idx] = generate_matrix(size, 0);
 
-            input_matrices[idx] = generate_matrix(size, 1);
-            output_matrices[idx] = generate_matrix(size, 0);
+				uarg = &uargs[idx];
+				uarg->_A = input_matrices[idx];
+				uarg->_C = output_matrices[idx];
 
-            uarg = &uargs[idx];
-            uarg->_A = input_matrices[idx];
-            uarg->_C = output_matrices[idx];
+				uarg->tid = (unsigned)idx;
+				uarg->gid = 0;
 
-            uarg->tid = (unsigned)idx;
-            uarg->gid = 0;
+				uthread_create(&utids[idx], uthread_mulmat, uarg, uarg->gid, credits);
 
-            uthread_create(&utids[idx], uthread_mulmat, uarg, uarg->gid, credits);
-
-            idx++;
+				idx++;
+			}
         }
-    }
+	}
+	
+	assert(idx == NUM_THREADS);
 
 	gtthread_app_exit();
 

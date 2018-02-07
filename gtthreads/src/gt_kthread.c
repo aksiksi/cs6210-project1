@@ -451,8 +451,9 @@ yield_again:
 
 int kthreads_done() {
     int done = ~0;
+	int inx;
 
-    for (int inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+    for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
         if (!kthread_cpu_map[inx])
             break;
 
