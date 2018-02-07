@@ -123,18 +123,6 @@ void free_matrix(matrix_t *m) {
 	}
 }
 
-void cleanup_matrices() {
-    int i;
-    matrix_t *m;
-
-    for (i = 0; i < NUM_THREADS; i++) {
-        m = input_matrices[i];
-        free_matrix(m);
-        m = output_matrices[i];
-        free_matrix(m);
-    }
-}
-
 uthread_arg_t uargs[NUM_THREADS];
 uthread_t utids[NUM_THREADS];
 
@@ -209,7 +197,15 @@ int main(int argc, char **argv)
 
 	gtthread_app_exit();
 
-    cleanup_matrices();
+	// Matrix cleanup
+    matrix_t *m;
+
+    for (i = 0; i < NUM_THREADS; i++) {
+        m = input_matrices[i];
+        free_matrix(m);
+        m = output_matrices[i];
+        free_matrix(m);
+    }
 
 	// print_matrix(&C);
 	// fprintf(stderr, "********************************");
