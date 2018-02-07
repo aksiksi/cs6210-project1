@@ -12,7 +12,7 @@
 
 #include "gt_include.h"
 
-#define NUM_THREADS 10
+#define NUM_THREADS 4
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
  * Let T(g, t) be thread 't' in group 'g'. 

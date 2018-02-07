@@ -193,7 +193,7 @@ void update_credit_balances(kthread_context_t *k_ctx) {
     gt_spinlock_t *lock = &kthread_runq->kthread_runqlock;
     uthread_head_t *u_head;
 
-    // Get head of expired queue
+    // Get end of expired queue
     u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
     uthread_struct_t *u_thread = TAILQ_FIRST(u_head);
 
@@ -217,15 +217,10 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 
             // Now as UNDER!
             add_to_runqueue(kthread_runq->active_runq, lock, u_thread);
-
-            // Set correct pointer to next uthread
-            u_thread = u_thread_next;
-
-            continue;
         }
 
         // Get next uthread in queue
-        u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+        u_thread = u_thread_next;
     }
 
     // Deduct credits for the dude who already ran!
@@ -415,7 +410,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 
 	/* Num of logical processors (cpus/cores) */
     #if DEBUG
-    num_cpus = 1;
+    num_cpus = 2;
     #else
     num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
     #endif

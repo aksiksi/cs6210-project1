@@ -153,10 +153,15 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 
             // If over credits, add to expired/over runqueue
             // Otherwise, put it back at the *tail* of the active runqueue
-            if (u_obj->uthread_priority == UTHREAD_CREDIT_OVER)
-			    add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
-            else
-                add_to_runqueue(kthread_runq->active_runq, &(kthread_runq->kthread_runqlock), u_obj);
+            if (k_ctx->scheduler == GT_SCHED_CREDIT) {
+                if (u_obj->uthread_priority == UTHREAD_CREDIT_OVER)
+                    add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
+                else
+                    add_to_runqueue(kthread_runq->active_runq, &(kthread_runq->kthread_runqlock), u_obj);
+            } else {
+                // For priority: just expire!
+                add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
+            }
 
             #if DEBUG
             fprintf(stderr, "Returning uthread(%d) to queue\n", u_obj->uthread_tid);

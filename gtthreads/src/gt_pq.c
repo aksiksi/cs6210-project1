@@ -205,7 +205,7 @@ extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_run
 		kthread_runq->active_runq = kthread_runq->expires_runq;
 		kthread_runq->expires_runq = runq;
 
-		runq = kthread_runq->expires_runq;
+		runq = kthread_runq->active_runq;
 		if(!runq->uthread_mask)
 		{
 			assert(!runq->uthread_tot);
@@ -436,7 +436,7 @@ static void fill_runq(runqueue_t *runq)
 	{
 		u_obj = &u_objs[inx];
 		u_obj->uthread_tid = inx;
-		u_obj->uthread_gid = (inx % MAX_UTHREAD_GROUPS);
+		u_obj->uthread_gid = 0;
 		u_obj->uthread_priority = (inx % MAX_UTHREAD_PRIORITY);
 		__add_to_runqueue(runq, u_obj);
 		printf("Uthread (id:%d , prio:%d) inserted\n", u_obj->uthread_tid, u_obj->uthread_priority);
@@ -496,22 +496,23 @@ static void empty_runq(runqueue_t *runq)
 
 int main()
 {
-	runqueue_t *active_runq, *expires_runq;
-	uthread_struct_t *u_obj;
-	int inx;
+    runqueue_t *active_runq, *expires_runq;
+    uthread_struct_t *u_obj;
+    int inx;
 
-	active_runq = &active_runqueue;
-	expires_runq = &expires_runqueue;
+    active_runq = &active_runqueue;
+    expires_runq = &expires_runqueue;
 
-	init_runqueue(active_runq);
-	init_runqueue(expires_runq);
+    init_runqueue(active_runq);
+    init_runqueue(expires_runq);
 
-	fill_runq(active_runq);
-	print_runq_stats(active_runq, "ACTIVE");
-	print_runq_stats(expires_runq, "EXPIRES");
-	change_runq(active_runq, expires_runq);
-	
-	return 0;
+    fill_runq(active_runq);
+    print_runq_stats(active_runq, "ACTIVE");
+    print_runq_stats(expires_runq, "EXPIRES");
+
+    uthread_head_t *head = &active_runq->prio_array[0].group[0];
+
+    return 0;
 }
 
 #endif
