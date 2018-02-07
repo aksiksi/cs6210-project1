@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=gnu99 -O3 -DDEBUG=0
+CFLAGS = -std=gnu99 -O0 -DDEBUG=0 # Only O0 works on the server!
 LDFLAGS = 
 LIBS = .
 SRC = src/gt_kthread.c src/gt_uthread.c src/gt_pq.c src/gt_signal.c src/gt_spinlock.c

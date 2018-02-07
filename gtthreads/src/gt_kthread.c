@@ -378,8 +378,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
     #if DEBUG
         num_cpus = 4;
     #else
-//        num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
-    num_cpus = 3;
+       num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
     #endif
 
     fprintf(stderr, "Number of cores : %d\n", num_cpus);
