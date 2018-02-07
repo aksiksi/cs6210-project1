@@ -288,6 +288,10 @@ extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_ru
     for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
         // Iterate over all OTHER kthreads
         if ((temp_k_ctx = kthread_cpu_map[inx]) && temp_k_ctx != k_ctx) {
+            // If target has no uthreads, ignore
+            if (!temp_k_ctx->krunqueue.active_runq->uthread_tot)
+                continue;
+
             // Acquire lock for target kthread
             temp_lock = &temp_k_ctx->krunqueue.kthread_runqlock;
             gt_spin_lock(temp_lock);
@@ -330,15 +334,19 @@ extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_ru
     for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
         temp_k_ctx = kthread_cpu_map[inx];
 
-        // Skip if kthread NULL, or same, or DONE
+        // Skip if kthread NULL, or same, or no uthreads
         if (temp_k_ctx == NULL || temp_k_ctx == k_ctx)
+            continue;
+
+        // Check if kthread has uthreads available
+        expires_runq = temp_k_ctx->krunqueue.expires_runq;
+        if (!expires_runq->uthread_tot)
             continue;
 
         // Acquire a lock for other kthread
         temp_lock = &temp_k_ctx->krunqueue.kthread_runqlock;
         gt_spin_lock(temp_lock);
 
-        expires_runq = temp_k_ctx->krunqueue.expires_runq;
         u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
         u_thread = TAILQ_FIRST(u_head);
 

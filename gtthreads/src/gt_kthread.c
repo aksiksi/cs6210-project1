@@ -345,14 +345,23 @@ static void gtthread_app_start(void *arg)
 			/* siglongjmp to this point is done when there
 			 * are no more uthreads to schedule.*/
 			/* XXX: gtthread app cleanup has to be done. */
-			continue;
+            if (k_ctx->scheduler == GT_SCHED_PRIORITY)
+			    continue;
 		}
+
+        /* Done executing all uthreads. Return to main */
+        /* XXX: We can actually get rid of KTHREAD_DONE flag */
+        if(ksched_shared_info.kthread_tot_uthreads && !ksched_shared_info.kthread_cur_uthreads)
+        {
+            fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
+            k_ctx->kthread_flags |= KTHREAD_DONE;
+        }
 
         // Only perform eager scheduling in PRIORITY mode!
         if (k_ctx->scheduler == GT_SCHED_PRIORITY)
 		    uthread_schedule(&sched_find_best_uthread);
-        else
-            uthread_schedule(&credit_find_best_uthread);
+//        else
+//            uthread_schedule(&credit_find_best_uthread);
 	}
 	
 	kthread_exit();
@@ -388,7 +397,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 
 	/* Num of logical processors (cpus/cores) */
     #if DEBUG
-    num_cpus = 3;
+    num_cpus = 4;
     #else
     num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
     #endif
@@ -440,6 +449,22 @@ yield_again:
 	return;
 }
 
+int kthreads_done(kthread_context_t *k_ctx) {
+    int done = 1;
+
+    if (k_ctx->scheduler == GT_SCHED_PRIORITY)
+        return (k_ctx->kthread_flags & KTHREAD_DONE);
+
+    for (int inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+        if (!kthread_cpu_map[inx])
+            break;
+
+        done = done && (k_ctx->kthread_flags & KTHREAD_DONE);
+    }
+
+    return done;
+}
+
 extern void gtthread_app_exit()
 {
 	/* gtthread_app_exit called by only main thread. */
@@ -449,7 +474,7 @@ extern void gtthread_app_exit()
 	k_ctx = kthread_cpu_map[kthread_apic_id()];
 	k_ctx->kthread_flags &= ~KTHREAD_DONE;
 
-	while(!(k_ctx->kthread_flags & KTHREAD_DONE))
+	while(!kthreads_done(k_ctx))
 	{
 		__asm__ __volatile__ ("pause\n");
 		if(sigsetjmp(k_ctx->kthread_env, 0))
@@ -464,8 +489,8 @@ extern void gtthread_app_exit()
 
         if (k_ctx->scheduler == GT_SCHED_PRIORITY)
 		    uthread_schedule(&sched_find_best_uthread);
-        else
-            uthread_schedule(&credit_find_best_uthread);
+//        else
+//            uthread_schedule(&credit_find_best_uthread);
 	}
 
 	kthread_block_signal(SIGVTALRM);

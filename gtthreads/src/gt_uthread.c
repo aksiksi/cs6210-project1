@@ -148,6 +148,8 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
             fprintf(stderr, "Deducted %.3f credits from uthread(%d) -- used %.3f\n",
                     credit_penalty,
                     u_obj->uthread_tid, used_time);
+            if (credit_penalty < 5)
+                fprintf(stderr, "\n");
             #endif
         }
 		
@@ -165,6 +167,7 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 				ksched_shared_info_t *ksched_info = &ksched_shared_info;
 				gt_spin_lock(&ksched_info->ksched_lock);
 				ksched_info->kthread_cur_uthreads--;
+                fprintf(stderr, "DEDUCTED!\n");
 				gt_spin_unlock(&ksched_info->ksched_lock);
 			}
 		}
@@ -198,20 +201,20 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	/* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
 	if (!(u_obj = kthread_best_sched_uthread(kthread_runq)))
 	{
-		/* Done executing all uthreads. Return to main */
-		/* XXX: We can actually get rid of KTHREAD_DONE flag */
-		if(ksched_shared_info.kthread_tot_uthreads && !ksched_shared_info.kthread_cur_uthreads)
-		{
-			fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
-			k_ctx->kthread_flags |= KTHREAD_DONE;
-		}
+        if(k_ctx->cpuid == 0 &&
+           ksched_shared_info.kthread_tot_uthreads && !ksched_shared_info.kthread_cur_uthreads)
+        {
+            fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
+            k_ctx->kthread_flags |= KTHREAD_DONE;
+        }
 
 		siglongjmp(k_ctx->kthread_env, 1);
 		return;
 	}
 
     #if DEBUG
-    fprintf(stderr, "kthread(%d) found a new baby! -> uthread(%d)\n", k_ctx->cpuid, u_obj->uthread_tid);
+    fprintf(stderr, "kthread(%d) found a new baby! -> uthread(%d), state=%d\n",
+            k_ctx->cpuid, u_obj->uthread_tid, u_obj->uthread_state);
     #endif
 
 	kthread_runq->cur_uthread = u_obj;
