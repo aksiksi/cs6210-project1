@@ -199,9 +199,8 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 	u_thread = TAILQ_FIRST(u_head);
 
 	while (u_thread != NULL) {
-		// Bump up credit count for any runnable threads
-		if (u_thread->uthread_state & UTHREAD_RUNNABLE)
-        	u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+		// Bump up credit count for any active uthreads
+		u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
 
 		// Get next uthread in queue
         u_thread = TAILQ_NEXT(u_thread, uthread_runq);
@@ -218,9 +217,8 @@ void update_credit_balances(kthread_context_t *k_ctx) {
         // Keep pointer to NEXT
         u_thread_next = TAILQ_NEXT(u_thread, uthread_runq);
 
-        // Bump up credit count
-		if (u_thread->uthread_state & UTHREAD_RUNNABLE)
-        	u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+        // Bump up credit count of any expired uthreads
+		u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
 
         // If OVER and credits > 0, move to active runq
         if (u_thread->uthread_priority == UTHREAD_CREDIT_OVER && u_thread->uthread_credits > 0) {
