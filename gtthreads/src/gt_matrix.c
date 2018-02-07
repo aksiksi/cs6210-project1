@@ -12,7 +12,7 @@
 
 #include "gt_include.h"
 
-#define NUM_THREADS 4
+#define NUM_THREADS 16
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
  * Let T(g, t) be thread 't' in group 'g'. 
@@ -85,7 +85,6 @@ static void uthread_mulmat(void *p)
 {
 	int i, j, k;
 	unsigned int cpuid;
-	struct timeval tv2;
 
 #define ptr ((uthread_arg_t *)p)
 
@@ -107,9 +106,12 @@ static void uthread_mulmat(void *p)
         }
     }
 
-    gettimeofday(&tv2,NULL);
-	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
-			ptr->tid, ptr->gid, cpuid, (tv2.tv_sec - tv1.tv_sec), (tv2.tv_usec - tv1.tv_usec));
+    struct timeval tv2, diff;
+    gettimeofday(&tv2, NULL);
+    timersub(&tv2, &tv1, &diff);
+
+    fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
+			ptr->tid, ptr->gid, cpuid, diff.tv_sec, diff.tv_usec);
 
 #undef ptr
 }
@@ -169,26 +171,47 @@ int main(int argc, char **argv)
         printf("SCHEDULER = PRIORITY\n");
 
 	uthread_arg_t *uarg;
-	int inx;
 
-    init_matrices();
-
-	int credits = 25;
 	gtthread_app_init(sched);
 
-	gettimeofday(&tv1,NULL);
+    gettimeofday(&tv1, NULL);
 
-	for(inx=0; inx<NUM_THREADS; inx++)
-	{
-		uarg = &uargs[inx];
-		uarg->_A = input_matrices[inx];
-		uarg->_C = output_matrices[inx];
+    int i, j, k;
 
-		uarg->tid = (unsigned)inx;
-		uarg->gid = 0;
+    int credit_values[4] = {25, 50, 75, 100};
+    int credits;
 
-		uthread_create(&utids[inx], uthread_mulmat, uarg, uarg->gid, credits);
-	}
+    int matrix_sizes[4] = {128, 64, 256, 512};
+    int size;
+
+    int idx = 0;
+
+    for (i = 0; i < 4; i++) {
+        // For each credit type
+        credits = credit_values[i];
+
+        for (j = 0; j < 4; j++) {
+            // For each size
+            size = matrix_sizes[j];
+
+            // TODO
+            for (k = 0; k < (NUM_THREADS/8); k++);
+
+            input_matrices[idx] = generate_matrix(size, 1);
+            output_matrices[idx] = generate_matrix(size, 0);
+
+            uarg = &uargs[idx];
+            uarg->_A = input_matrices[idx];
+            uarg->_C = output_matrices[idx];
+
+            uarg->tid = (unsigned)idx;
+            uarg->gid = 0;
+
+            uthread_create(&utids[idx], uthread_mulmat, uarg, uarg->gid, credits);
+
+            idx++;
+        }
+    }
 
 	gtthread_app_exit();
 

@@ -167,7 +167,6 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 				ksched_shared_info_t *ksched_info = &ksched_shared_info;
 				gt_spin_lock(&ksched_info->ksched_lock);
 				ksched_info->kthread_cur_uthreads--;
-                fprintf(stderr, "DEDUCTED!\n");
 				gt_spin_unlock(&ksched_info->ksched_lock);
 			}
 		}
@@ -201,10 +200,7 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	/* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
 	if (!(u_obj = kthread_best_sched_uthread(kthread_runq)))
 	{
-        if(k_ctx->cpuid == 0 &&
-           ksched_shared_info.kthread_tot_uthreads && !ksched_shared_info.kthread_cur_uthreads)
-        {
-            fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
+        if(ksched_shared_info.kthread_tot_uthreads && k_ctx->cpuid == 0) {
             k_ctx->kthread_flags |= KTHREAD_DONE;
         }
 
@@ -351,7 +347,7 @@ extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, 
 		gt_spin_unlock(&ksched_info->ksched_lock);
 	}
 
-	#ifdef DEBUG
+	#if DEBUG
 		fprintf(stderr, "uthread(%d) created successfully\n", u_new->uthread_tid);
 	#endif
 
