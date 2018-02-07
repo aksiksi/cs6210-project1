@@ -9,6 +9,7 @@
 #include <setjmp.h>
 #include <errno.h>
 #include <assert.h>
+#include <math.h>
 
 #include "gt_include.h"
 
@@ -37,7 +38,10 @@ typedef struct __uthread_arg
 
 	unsigned int tid;
 	unsigned int gid;
-	unsigned int credits;
+
+	unsigned int credits; // Original num credits
+    struct timeval runtime; // Run time (real)
+    unsigned int size; // Matrix size
 } uthread_arg_t;
 	
 struct timeval tv1;
@@ -109,12 +113,12 @@ static void uthread_mulmat(void *p)
         }
     }
 
-    struct timeval tv2, diff;
+    struct timeval tv2;
     gettimeofday(&tv2, NULL);
-    timersub(&tv2, &tv1, &diff);
+    timersub(&tv2, &tv1, &ptr->runtime);
 
     fprintf(stderr, "Thread(id:%d, credits: %d, size: %d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
-			ptr->tid, ptr->credits, ptr->_A->rows, cpuid, diff.tv_sec, diff.tv_usec);
+			ptr->tid, ptr->credits, ptr->_A->rows, cpuid, ptr->runtime.tv_sec, ptr->runtime.tv_usec);
 
 #undef ptr
 }
@@ -164,7 +168,7 @@ int main(int argc, char **argv)
     int credit_values[4] = {25, 50, 75, 100};
     int credits;
 
-    int matrix_sizes[4] = {128, 64, 256, 512};
+    int matrix_sizes[4] = {64, 128, 256, 512};
     int size;
 
     int idx = 0;
@@ -189,6 +193,7 @@ int main(int argc, char **argv)
 				uarg->tid = (unsigned)idx;
 				uarg->gid = 0;
 				uarg->credits = credits;
+                uarg->size = size;
 
 				uthread_create(&utids[idx], uthread_mulmat, uarg, uarg->gid, credits);
 
@@ -210,6 +215,51 @@ int main(int argc, char **argv)
         m = output_matrices[i];
         free_matrix(m);
     }
+
+    double mean, stdev;
+    double runtime;
+
+    idx = 0;
+
+    printf("Summary stats:\n");
+    printf("--------------\n");
+
+    // Summary stats for real execution time
+    for (i = 0; i < 4; i++) {
+        credits = credit_values[i];
+
+        for (j = 0; j < 4; j++) {
+            size = matrix_sizes[j];
+
+            printf("\n* Set: (credits = %d, size = %d)\n", credits, size);
+
+            // Compute mean of runs for *this* set
+            mean = 0;
+
+            for (k = 0; k < (NUM_THREADS/16); k++) {
+                // uthread elapsed time in s
+                runtime = uargs[idx + k].runtime.tv_sec + (uargs[idx + k].runtime.tv_usec / 1000000.0);
+                mean += runtime;
+            }
+
+            mean /= k;
+
+            // Compute stdev for this set
+            stdev = 0;
+
+            for (k = 0; k < (NUM_THREADS/16); k++) {
+                runtime = uargs[idx + k].runtime.tv_sec + (uargs[idx + k].runtime.tv_usec / 1000000.0);
+                stdev += pow(fabs(runtime - mean), 2);
+            }
+
+            stdev = sqrt(stdev / k);
+
+            printf("*** Mean: %.6f, Stdev: %.6f\n", mean, stdev);
+
+            idx += k;
+        }
+    }
+
 
 	// print_matrix(&C);
 	// fprintf(stderr, "********************************");
