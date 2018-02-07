@@ -28,13 +28,3 @@ add_executable(matrix src/gt_matrix.c)
 add_dependencies(matrix gtthreads)
 
 target_link_libraries(matrix gtthreads)
-
-# gtpq (testing)
-add_executable(gtpq src/gt_pq.c)
-
-target_compile_definitions(gtpq PRIVATE -DPQ_DEBUG)
-
-add_dependencies(gtpq gtthreads)
-
-target_link_libraries(gtpq gtthreads)
-
