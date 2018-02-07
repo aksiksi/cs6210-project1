@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O3 -DDEBUG=0
+CFLAGS = -std=gnu99 -O3 -DDEBUG=0
 LDFLAGS = 
 LIBS = .
 SRC = src/gt_kthread.c src/gt_uthread.c src/gt_pq.c src/gt_signal.c src/gt_spinlock.c
@@ -15,9 +15,6 @@ $(OUT): $(OBJ)
 
 matrix:
 	$(CC) $(CFLAGS) src/gt_matrix.c $(OUT) -o bin/matrix
-
-gtpq: $(OUT)
-	$(CC) $(CFLAGS) -DPQ_DEBUG src/gt_pq.c $(OUT) -o bin/gtpq
 
 #all : gt_include.h gt_kthread.c gt_kthread.h gt_uthread.c gt_uthread.h gt_pq.c gt_pq.h gt_signal.h gt_signal.c gt_spinlock.h gt_spinlock.c gt_matrix.c
 #	@echo Building...
