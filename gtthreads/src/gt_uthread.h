@@ -28,7 +28,7 @@ typedef struct uthread_struct
 	int uthread_state; /* UTHREAD_INIT, UTHREAD_RUNNABLE, UTHREAD_RUNNING, UTHREAD_CANCELLED, UTHREAD_DONE */
 	int uthread_priority; /* uthread running priority */
     int uthread_original_credits;
-	int uthread_credits; /* Current credit count (used only in credit scheduler!) */
+	double uthread_credits; /* Current credit count (used only in credit scheduler!) */
 	int cpu_id; /* cpu it is currently executing on */
 	int last_cpu_id; /* last cpu it was executing on */
 	

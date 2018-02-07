@@ -12,12 +12,7 @@
 
 #include "gt_include.h"
 
-#define ROWS 512
-#define COLS ROWS
-#define SIZE COLS
-
-#define NUM_THREADS 1
-#define PER_THREAD_ROWS (SIZE/NUM_THREADS)
+#define NUM_THREADS 10
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
  * Let T(g, t) be thread 't' in group 'g'. 
@@ -26,115 +21,129 @@
 
 typedef struct matrix
 {
-	int m[SIZE][SIZE];
+    // 2D array
+	int *arr;
 
 	int rows;
 	int cols;
 	unsigned int reserved[2];
 } matrix_t;
 
-
 typedef struct __uthread_arg
 {
-	matrix_t *_A, *_B, *_C;
+    // Compute A*A = C
+	matrix_t *_A, *_C;
 	unsigned int reserved0;
 
 	unsigned int tid;
 	unsigned int gid;
-	int start_row; /* start_row -> (start_row + PER_THREAD_ROWS) */
-	int start_col; /* start_col -> (start_col + PER_GROUP_COLS) */
 	
-}uthread_arg_t;
+} uthread_arg_t;
 	
 struct timeval tv1;
 
-static void generate_matrix(matrix_t *mat, int val)
-{
+/* Generates a square 2D matrix; returns pointer */
+static matrix_t *generate_matrix(int size, int val) {
+    int i, j;
 
-	int i,j;
-	mat->rows = SIZE;
-	mat->cols = SIZE;
-	for(i = 0; i < mat->rows;i++)
-		for( j = 0; j < mat->cols; j++ )
-		{
-			mat->m[i][j] = val;
-		}
-	return;
+    // Allocate a matrix
+    matrix_t *m = (matrix_t *)MALLOC_SAFE(sizeof(matrix_t));
+
+    // Allocate entire matrix as single block
+    m->arr = (int *)MALLOC_SAFE(size * size * sizeof(int));
+
+    int *row;
+
+    // Fill with val
+    for (i = 0; i < size; i++)
+        for (j = 0, row = m->arr + i * size; j < size; j++)
+            row[j] = val;
+
+    m->rows = size;
+    m->cols = size;
+
+	return m;
 }
 
 static void print_matrix(matrix_t *mat)
 {
 	int i, j;
 
-	for(i=0;i<SIZE;i++)
+	for(i=0;i<mat->rows;i++)
 	{
-		for(j=0;j<SIZE;j++)
-			printf(" %d ",mat->m[i][j]);
+        int *row = mat->arr + i * mat->rows;
+
+        for(j=0;j<mat->cols;j++)
+			printf("%d ",row[j]);
 		printf("\n");
 	}
 
 	return;
 }
 
-static void * uthread_mulmat(void *p)
+static void uthread_mulmat(void *p)
 {
 	int i, j, k;
-	int start_row, end_row;
-	int start_col, end_col;
 	unsigned int cpuid;
 	struct timeval tv2;
 
 #define ptr ((uthread_arg_t *)p)
 
-	i=0; j= 0; k=0;
-
-	start_row = ptr->start_row;
-	end_row = (ptr->start_row + PER_THREAD_ROWS);
-
-#ifdef GT_GROUP_SPLIT
-	start_col = ptr->start_col;
-	end_col = (ptr->start_col + PER_THREAD_ROWS);
-#else
-	start_col = 0;
-	end_col = SIZE;
-#endif
-
-#ifdef GT_THREADS
 	cpuid = kthread_cpu_map[kthread_apic_id()]->cpuid;
 	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) started\n",ptr->tid, ptr->gid, cpuid);
-#else
-	fprintf(stderr, "Thread(id:%d, group:%d) started\n",ptr->tid, ptr->gid);
-#endif
 
-	for(i = start_row; i < end_row; i++)
-		for(j = start_col; j < end_col; j++)
-			for(k = 0; k < SIZE; k++)
-				ptr->_C->m[i][j] += ptr->_A->m[i][k] * ptr->_B->m[k][j];
+    int *r1, *r2, *c1;
+    int size = ptr->_A->rows;
 
-#ifdef GT_THREADS
+	for(i = 0; i < size; i++) {
+        r1 = ptr->_A->arr + i * ptr->_A->rows;
+        r2 = ptr->_C->arr + i * ptr->_C->rows;
+
+        for(j = 0; j < size; j++) {
+            for(k = 0; k < size; k++) {
+                c1 = ptr->_A->arr + k * ptr->_A->rows;
+                r2[j] += r1[k] * c1[j];
+            }
+        }
+    }
+
+    gettimeofday(&tv2,NULL);
 	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
 			ptr->tid, ptr->gid, cpuid, (tv2.tv_sec - tv1.tv_sec), (tv2.tv_usec - tv1.tv_usec));
-#else
-	gettimeofday(&tv2,NULL);
-	fprintf(stderr, "Thread(id:%d, group:%d) finished (TIME : %lu s and %lu us)\n",
-			ptr->tid, ptr->gid, (tv2.tv_sec - tv1.tv_sec), (tv2.tv_usec - tv1.tv_usec));
-#endif
 
 #undef ptr
-	return 0;
 }
 
-matrix_t A, B, C;
+// 1 matrix per thread => 1 output ("squaring")
+matrix_t *input_matrices[NUM_THREADS];
+matrix_t *output_matrices[NUM_THREADS];
 
 static void init_matrices()
 {
-	generate_matrix(&A, 1);
-	generate_matrix(&B, 1);
-	generate_matrix(&C, 0);
+    int i;
 
-	return;
+    for (i = 0; i < NUM_THREADS; i++) {
+        input_matrices[i] = generate_matrix(512, 1);
+        output_matrices[i] = generate_matrix(512, 0);
+    }
 }
 
+void free_matrix(matrix_t *m) {
+    free(m->arr);
+    free(m);
+}
+
+static void cleanup_matrices() {
+    int i;
+    matrix_t *m;
+
+    for (i = 0; i < NUM_THREADS; i++) {
+        m = input_matrices[i];
+        free_matrix(m);
+        m = output_matrices[i];
+        free_matrix(m);
+    }
+}
 
 uthread_arg_t uargs[NUM_THREADS];
 uthread_t utids[NUM_THREADS];
@@ -154,39 +163,36 @@ int main(int argc, char **argv)
         exit(0);
     }
 
-    printf("%d", sched);
+    if (sched)
+        printf("SCHEDULER = CREDIT\n");
+    else
+        printf("SCHEDULER = PRIORITY\n");
 
 	uthread_arg_t *uarg;
 	int inx;
 
+    init_matrices();
+
 	int credits = 25;
 	gtthread_app_init(sched);
-
-	init_matrices();
 
 	gettimeofday(&tv1,NULL);
 
 	for(inx=0; inx<NUM_THREADS; inx++)
 	{
 		uarg = &uargs[inx];
-		uarg->_A = &A;
-		uarg->_B = &B;
-		uarg->_C = &C;
+		uarg->_A = input_matrices[inx];
+		uarg->_C = output_matrices[inx];
 
-		uarg->tid = inx;
-
+		uarg->tid = (unsigned)inx;
 		uarg->gid = 0;
-
-		uarg->start_row = (inx * PER_THREAD_ROWS);
-#ifdef GT_GROUP_SPLIT
-		/* Wanted to split the columns by groups !!! */
-		uarg->start_col = (uarg->gid * PER_GROUP_COLS);
-#endif
 
 		uthread_create(&utids[inx], uthread_mulmat, uarg, uarg->gid, credits);
 	}
 
 	gtthread_app_exit();
+
+    cleanup_matrices();
 
 	// print_matrix(&C);
 	// fprintf(stderr, "********************************");

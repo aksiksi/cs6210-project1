@@ -29,7 +29,7 @@ static int uthread_init(uthread_struct_t *u_new);
 
 /**********************************************************************/
 /* uthread creation */
-#define UTHREAD_DEFAULT_SSIZE (16 * 1024)
+#define UTHREAD_DEFAULT_SSIZE (32 * 1024)
 
 extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid, int credits);
 
@@ -70,7 +70,6 @@ static int uthread_init(uthread_struct_t *u_new)
 	sigemptyset(&set);
 	sigaddset(&set, SIGUSR2);
 	sigprocmask(SIG_UNBLOCK, &set, &oldset);
-
 
 	/* SIGUSR2 handler expects kthread_runq->cur_uthread
 	 * to point to the newly created thread. We will temporarily
@@ -129,31 +128,6 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	{
 		/* Go through the runq and schedule the next thread to run */
 		kthread_runq->cur_uthread = NULL;
-
-        /* If credit enabled, deduct credits based on current uthread run time. */
-        if (k_ctx->scheduler == GT_SCHED_CREDIT) {
-            double used_time; // unit: useconds
-
-            if (u_obj->uthread_state & UTHREAD_DONE)
-                used_time = (double)(u_obj->done_time - u_obj->running_time) / (CLOCKS_PER_SEC / 1000000.0);
-            else
-                used_time = (double)(clock() - u_obj->running_time) / (CLOCKS_PER_SEC / 1000000.0);
-
-            int credit_penalty = (int)((used_time / KTHREAD_VTALRM_USEC) * UTHREAD_DEFAULT_CREDITS);
-
-            u_obj->uthread_credits -= credit_penalty;
-
-            if (u_obj->uthread_credits < 0)
-                u_obj->uthread_priority = UTHREAD_CREDIT_OVER;
-            else
-                u_obj->uthread_priority = UTHREAD_CREDIT_UNDER;
-
-            #if DEBUG
-            fprintf(stderr, "Deducted %d credits from uthread(%d) -- used %f\n",
-                    credit_penalty,
-                    u_obj->uthread_tid, used_time);
-            #endif
-        }
 		
 		if (u_obj->uthread_state & (UTHREAD_DONE | UTHREAD_CANCELLED))
 		{
@@ -184,7 +158,9 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
             else
                 add_to_runqueue(kthread_runq->active_runq, &(kthread_runq->kthread_runqlock), u_obj);
 
+            #if DEBUG
             fprintf(stderr, "Returning uthread(%d) to queue\n", u_obj->uthread_tid);
+            #endif
 
 			/* XXX: Save the context (signal mask not saved) */
 			if(sigsetjmp(u_obj->uthread_env, 0))
@@ -207,6 +183,10 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 		return;
 	}
 
+    #if DEBUG
+    fprintf(stderr, "kthread(%d) found a new baby! -> uthread(%d)\n", k_ctx->cpuid, u_obj->uthread_tid);
+    #endif
+
 	kthread_runq->cur_uthread = u_obj;
 
     if((u_obj->uthread_state == UTHREAD_INIT) && (uthread_init(u_obj)))
@@ -219,8 +199,8 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
     u_obj->running_time = clock();
 	
 	/* Re-install the scheduling signal handlers */
-//	kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
-//	kthread_install_sighandler(SIGUSR1, k_ctx->kthread_sched_relay);
+	kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
+	kthread_install_sighandler(SIGUSR1, k_ctx->kthread_sched_relay);
 
 	/* Jump to the selected uthread context */
 	siglongjmp(u_obj->uthread_env, 1);
@@ -237,7 +217,8 @@ static void uthread_context_func(int signo)
 	uthread_struct_t *cur_uthread;
 	kthread_runqueue_t *kthread_runq;
 
-	kthread_runq = &(kthread_cpu_map[kthread_apic_id()]->krunqueue);
+    kthread_context_t *k_ctx = kthread_cpu_map[kthread_apic_id()];
+	kthread_runq = &(k_ctx->krunqueue);
 
     #if 0
     fprintf(stderr, "..... uthread_context_func (STATE=%d, T=%d) .....\n",
@@ -277,8 +258,10 @@ static void uthread_context_func(int signo)
 	cur_uthread->uthread_state = UTHREAD_DONE;
     cur_uthread->done_time = clock();
 
-	uthread_schedule(&sched_find_best_uthread);
-	return;
+    if (k_ctx->scheduler == GT_SCHED_PRIORITY)
+        uthread_schedule(&sched_find_best_uthread);
+    else
+        uthread_schedule(&credit_find_best_uthread);
 }
 
 /**********************************************************************/

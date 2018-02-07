@@ -183,6 +183,10 @@ extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *u_obj)
 void update_credit_balances(kthread_context_t *k_ctx) {
     /*
      * Iterate over uthreads in the expired queue and add current timeslice credits.
+     *
+     * Also, perform credit deduction for CURRENT uthread
+     *
+     * TODO: if this does not work, try moving function to gt_pq?
      */
     kthread_runqueue_t *kthread_runq = &k_ctx->krunqueue;
     runqueue_t *expires_runq = kthread_runq->expires_runq;
@@ -201,21 +205,17 @@ void update_credit_balances(kthread_context_t *k_ctx) {
         u_thread_next = TAILQ_NEXT(u_thread, uthread_runq);
 
         // Bump up credit count
-        gt_spin_lock(lock);
         u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
-        gt_spin_unlock(lock);
 
-        // Move to active queue if now UNDER
-        if (u_thread->uthread_credits > 0) {
+        // If OVER and credits > 0, move to active runq
+        if (u_thread->uthread_priority == UTHREAD_CREDIT_OVER && u_thread->uthread_credits > 0) {
             // Set to UNDER
-            gt_spin_lock(lock);
             u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
-            gt_spin_unlock(lock);
 
-            // Remove from expired queue
+            // Remove from expired OVER queue
             rem_from_runqueue(kthread_runq->expires_runq, lock, u_thread);
 
-            // Add to active queue
+            // Now as UNDER!
             add_to_runqueue(kthread_runq->active_runq, lock, u_thread);
 
             // Set correct pointer to next uthread
@@ -226,6 +226,28 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 
         // Get next uthread in queue
         u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+    }
+
+    // Deduct credits for the dude who already ran!
+    if ((u_thread = k_ctx->krunqueue.cur_uthread) && (u_thread->uthread_state & UTHREAD_RUNNING)) {
+        /* If credit enabled, deduct credits based on current uthread run time. */
+        double used_time; // unit: useconds
+        used_time = (double)(clock() - u_thread->running_time) / (CLOCKS_PER_SEC / 1000000.0);
+
+        double credit_penalty = (used_time / KTHREAD_VTALRM_USEC) * UTHREAD_DEFAULT_CREDITS;
+
+        u_thread->uthread_credits -= credit_penalty;
+
+        if (u_thread->uthread_credits < 0)
+            u_thread->uthread_priority = UTHREAD_CREDIT_OVER;
+        else
+            u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
+
+        #if DEBUG
+        fprintf(stderr, "Deducted %.3f credits from uthread(%d) -- used %f\n",
+                credit_penalty,
+                u_thread->uthread_tid, used_time);
+        #endif
     }
 }
 
@@ -250,7 +272,16 @@ static void ksched_priority(int signo)
 		fprintf(stderr, "kthread(%d) entered priority scheduler!\n", cur_k_ctx->cpuid);
     else
         fprintf(stderr, "kthread(%d) entered credit scheduler!\n", cur_k_ctx->cpuid);
-	#endif
+    #endif
+
+    // Perform credit updates for ALL kthreads
+    if (cur_k_ctx->scheduler == GT_SCHED_CREDIT) {
+        for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+            if ((tmp_k_ctx = kthread_cpu_map[inx])) {
+                update_credit_balances(tmp_k_ctx);
+            }
+        }
+    }
 
 	/* Relay the signal to all other virtual processors(kthreads) */
 	for(inx=0; inx<GT_MAX_KTHREADS; inx++)
@@ -265,10 +296,6 @@ static void ksched_priority(int signo)
 			syscall(__NR_tkill, tmp_k_ctx->tid, SIGUSR1);
 		}
 	}
-
-    // Perform credit updates for kthread0
-    if (cur_k_ctx->scheduler == GT_SCHED_CREDIT)
-        update_credit_balances(cur_k_ctx);
 
     if (cur_k_ctx->scheduler == GT_SCHED_PRIORITY)
 	    uthread_schedule(&sched_find_best_uthread);
@@ -307,10 +334,6 @@ static void ksched_cosched(int signal)
 	#if DEBUG
 		fprintf(stderr, "kthread(%d) received the USR1 signal!\n", cur_k_ctx->cpuid);
     #endif
-
-    // Perform credit balance update for current kthread
-    if (cur_k_ctx->scheduler == GT_SCHED_CREDIT)
-        update_credit_balances(cur_k_ctx);
 
     if (cur_k_ctx->scheduler == GT_SCHED_PRIORITY)
         uthread_schedule(&sched_find_best_uthread);
@@ -392,7 +415,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 
 	/* Num of logical processors (cpus/cores) */
     #if DEBUG
-    num_cpus = 2;
+    num_cpus = 1;
     #else
     num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
     #endif
