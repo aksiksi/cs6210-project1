@@ -192,10 +192,23 @@ void update_credit_balances(kthread_context_t *k_ctx) {
     runqueue_t *expires_runq = kthread_runq->expires_runq;
     gt_spinlock_t *lock = &kthread_runq->kthread_runqlock;
     uthread_head_t *u_head;
+	uthread_struct_t *u_thread
+
+	// Bump credits for all uthreads in the active queue
+	u_head = &kthread_runq->active_runq->prio_array[UTHREAD_CREDIT_UNDER].group[0];
+	u_thread = TAILQ_FIRST(u_head);
+
+	while (u_thread != NULL && (u_thread->uthread_state & UTHREAD_RUNNABLE)) {
+		// Bump up credit count
+        u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+
+		// Get next uthread in queue
+        u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+	}
 
     // Get end of expired queue
     u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
-    uthread_struct_t *u_thread = TAILQ_FIRST(u_head);
+    u_thread = TAILQ_FIRST(u_head);
 
     // Store pointer to original NEXT
     uthread_struct_t *u_thread_next;

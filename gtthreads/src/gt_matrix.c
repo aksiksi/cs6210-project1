@@ -37,7 +37,7 @@ typedef struct __uthread_arg
 
 	unsigned int tid;
 	unsigned int gid;
-	
+	unsigned int credits;
 } uthread_arg_t;
 	
 struct timeval tv1;
@@ -89,7 +89,10 @@ static void uthread_mulmat(void *p)
 #define ptr ((uthread_arg_t *)p)
 
 	cpuid = kthread_cpu_map[kthread_apic_id()]->cpuid;
+
+	#if DEBUG
 	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) started\n",ptr->tid, ptr->gid, cpuid);
+	#endif
 
     int *r1, *r2, *c1;
     int size = ptr->_A->rows;
@@ -110,8 +113,8 @@ static void uthread_mulmat(void *p)
     gettimeofday(&tv2, NULL);
     timersub(&tv2, &tv1, &diff);
 
-    fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
-			ptr->tid, ptr->gid, cpuid, diff.tv_sec, diff.tv_usec);
+    fprintf(stderr, "Thread(id:%d, credits: %d, size: %d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
+			ptr->tid, ptr->credits, ptr->_A->rows, cpuid, diff.tv_sec, diff.tv_usec);
 
 #undef ptr
 }
@@ -185,6 +188,7 @@ int main(int argc, char **argv)
 
 				uarg->tid = (unsigned)idx;
 				uarg->gid = 0;
+				uarg->credits = credits;
 
 				uthread_create(&utids[idx], uthread_mulmat, uarg, uarg->gid, credits);
 
