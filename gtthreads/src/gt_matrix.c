@@ -116,20 +116,6 @@ static void uthread_mulmat(void *p)
 #undef ptr
 }
 
-// 1 matrix per thread => 1 output ("squaring")
-matrix_t *input_matrices[NUM_THREADS];
-matrix_t *output_matrices[NUM_THREADS];
-
-static void init_matrices()
-{
-    int i;
-
-    for (i = 0; i < NUM_THREADS; i++) {
-        input_matrices[i] = generate_matrix(512, 1);
-        output_matrices[i] = generate_matrix(512, 0);
-    }
-}
-
 void free_matrix(matrix_t *m) {
 	if (m) {
 		free(m->arr);
@@ -137,7 +123,7 @@ void free_matrix(matrix_t *m) {
 	}
 }
 
-static void cleanup_matrices() {
+void cleanup_matrices() {
     int i;
     matrix_t *m;
 
@@ -176,7 +162,11 @@ int main(int argc, char **argv)
 
 	gtthread_app_init(sched);
 
-    gettimeofday(&tv1, NULL);
+	gettimeofday(&tv1, NULL);
+	
+	// 1 matrix per thread => 1 output ("squaring")
+	matrix_t *input_matrices[NUM_THREADS];
+	matrix_t *output_matrices[NUM_THREADS];
 
     int i, j, k;
 
