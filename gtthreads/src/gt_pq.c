@@ -331,7 +331,7 @@ extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_ru
         temp_k_ctx = kthread_cpu_map[inx];
 
         // Skip if kthread NULL, or same, or DONE
-        if (temp_k_ctx == NULL || temp_k_ctx == k_ctx || (temp_k_ctx->kthread_flags & KTHREAD_DONE))
+        if (temp_k_ctx == NULL || temp_k_ctx == k_ctx)
             continue;
 
         // Acquire a lock for other kthread
@@ -344,7 +344,7 @@ extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_ru
 
         // If valid, remove it and return
         if (u_thread != NULL) {
-            rem_from_runqueue(expires_runq, temp_lock, u_thread);
+            __rem_from_runqueue(expires_runq, u_thread);
             gt_spin_unlock(temp_lock);
             return u_thread;
         }

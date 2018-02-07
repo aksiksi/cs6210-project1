@@ -209,11 +209,11 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 
         // If OVER and credits > 0, move to active runq
         if (u_thread->uthread_priority == UTHREAD_CREDIT_OVER && u_thread->uthread_credits > 0) {
-            // Set to UNDER
-            u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
-
             // Remove from expired OVER queue
             rem_from_runqueue(kthread_runq->expires_runq, lock, u_thread);
+
+            // Set to UNDER
+            u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
 
             // Now as UNDER!
             add_to_runqueue(kthread_runq->active_runq, lock, u_thread);
@@ -221,28 +221,6 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 
         // Get next uthread in queue
         u_thread = u_thread_next;
-    }
-
-    // Deduct credits for the dude who already ran!
-    if ((u_thread = k_ctx->krunqueue.cur_uthread) && (u_thread->uthread_state & UTHREAD_RUNNING)) {
-        /* If credit enabled, deduct credits based on current uthread run time. */
-        double used_time; // unit: useconds
-        used_time = (double)(clock() - u_thread->running_time) / (CLOCKS_PER_SEC / 1000000.0);
-
-        double credit_penalty = (used_time / KTHREAD_VTALRM_USEC) * UTHREAD_DEFAULT_CREDITS;
-
-        u_thread->uthread_credits -= credit_penalty;
-
-        if (u_thread->uthread_credits < 0)
-            u_thread->uthread_priority = UTHREAD_CREDIT_OVER;
-        else
-            u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
-
-        #if DEBUG
-        fprintf(stderr, "Deducted %.3f credits from uthread(%d) -- used %f\n",
-                credit_penalty,
-                u_thread->uthread_tid, used_time);
-        #endif
     }
 }
 
@@ -410,7 +388,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 
 	/* Num of logical processors (cpus/cores) */
     #if DEBUG
-    num_cpus = 2;
+    num_cpus = 3;
     #else
     num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
     #endif

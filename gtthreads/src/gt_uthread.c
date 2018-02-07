@@ -128,6 +128,28 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	{
 		/* Go through the runq and schedule the next thread to run */
 		kthread_runq->cur_uthread = NULL;
+
+        // Deduct credits for the dude who already ran!
+        if (k_ctx->scheduler == GT_SCHED_CREDIT && (u_obj->uthread_state == UTHREAD_RUNNING)) {
+            /* If credit enabled, deduct credits based on current uthread run time. */
+            double used_time; // unit: useconds
+            used_time = (double)(clock() - u_obj->running_time) / (CLOCKS_PER_SEC / 1000000.0);
+
+            double credit_penalty = (used_time / KTHREAD_VTALRM_USEC) * UTHREAD_DEFAULT_CREDITS;
+
+            u_obj->uthread_credits -= credit_penalty;
+
+            if (u_obj->uthread_credits < 0)
+                u_obj->uthread_priority = UTHREAD_CREDIT_OVER;
+            else
+                u_obj->uthread_priority = UTHREAD_CREDIT_UNDER;
+
+            #if DEBUG
+            fprintf(stderr, "Deducted %.3f credits from uthread(%d) -- used %.3f\n",
+                    credit_penalty,
+                    u_obj->uthread_tid, used_time);
+            #endif
+        }
 		
 		if (u_obj->uthread_state & (UTHREAD_DONE | UTHREAD_CANCELLED))
 		{
