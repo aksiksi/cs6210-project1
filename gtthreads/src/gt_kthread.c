@@ -200,7 +200,8 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 
 	while (u_thread != NULL) {
 		// Bump up credit count for any active uthreads
-		u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
+            u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
 
 		// Get next uthread in queue
         u_thread = TAILQ_NEXT(u_thread, uthread_runq);
@@ -218,7 +219,8 @@ void update_credit_balances(kthread_context_t *k_ctx) {
         u_thread_next = TAILQ_NEXT(u_thread, uthread_runq);
 
         // Bump up credit count of any expired uthreads
-		u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
+		    u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
 
         // If OVER and credits > 0, move to active runq
         if (u_thread->uthread_priority == UTHREAD_CREDIT_OVER && u_thread->uthread_credits > 0) {
@@ -373,7 +375,7 @@ static void gtthread_app_start(void *arg)
 //            uthread_schedule(&credit_find_best_uthread);
 	}
 
-    fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
+//    fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
     k_ctx->kthread_flags |= KTHREAD_DONE;
 	
 	kthread_exit();
@@ -394,7 +396,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
        num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
     #endif
 
-    fprintf(stderr, "Number of cores : %d\n", num_cpus);
+    fprintf(stderr, "Number of cores: %d\n", num_cpus);
 	
 	/* Initialize shared schedule information */
 	ksched_info_init(&ksched_shared_info, sched);
@@ -416,7 +418,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 	// Relays to other kthreads that it's time to schedule a uthread
 	kthread_install_sighandler(SIGUSR1, k_ctx_main->kthread_sched_relay);
 
-    fprintf(stderr, "Setup kthread(0) and timers!\n");
+//    fprintf(stderr, "Setup kthread(0) and timers!\n");
 
 	/* kthreads (virtual processors) on all other logical processors */
 	for(inx=1; inx<num_cpus; inx++)
@@ -433,7 +435,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 			exit(0);
 		}
 
-		fprintf(stderr, "kthread(%d) created!!\n", inx);
+//		fprintf(stderr, "kthread(%d) created!!\n", inx);
 	}
 
 	{
@@ -501,7 +503,7 @@ extern void gtthread_app_exit()
 		    uthread_schedule(&sched_find_best_uthread);
 	}
 
-    fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
+//    fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
 
 	kthread_block_signal(SIGVTALRM);
 	kthread_block_signal(SIGUSR1);

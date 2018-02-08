@@ -117,9 +117,11 @@ static void uthread_mulmat(void *p)
     gettimeofday(&tv2, NULL);
     timersub(&tv2, &tv1, &ptr->runtime);
 
+
+    #if DEBUG
     fprintf(stderr, "Thread(id:%d, credits: %d, size: %d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
 			ptr->tid, ptr->credits, ptr->_A->rows, cpuid, ptr->runtime.tv_sec, ptr->runtime.tv_usec);
-
+    #endif
 #undef ptr
 }
 
@@ -149,13 +151,15 @@ int main(int argc, char **argv)
     }
 
     if (sched)
-        printf("SCHEDULER = CREDIT\n");
+        printf("Scheduler: CREDIT\n");
     else
-        printf("SCHEDULER = PRIORITY\n");
+        printf("Scheduler: PRIORITY\n");
 
 	uthread_arg_t *uarg;
 
 	gtthread_app_init(sched);
+
+    printf("Initialized gtthreads library!\n");
 
 	gettimeofday(&tv1, NULL);
 	
@@ -172,6 +176,8 @@ int main(int argc, char **argv)
     int size;
 
     int idx = 0;
+
+    printf("Spawning threads...\n");
 
     for (i = 0; i < 4; i++) {
         // For each credit type
@@ -204,6 +210,8 @@ int main(int argc, char **argv)
 	
 	assert(idx == NUM_THREADS);
 
+    printf("Executing threads...\n");
+
 	gtthread_app_exit();
 
 	// Matrix cleanup
@@ -221,7 +229,7 @@ int main(int argc, char **argv)
 
     idx = 0;
 
-    printf("Summary stats:\n");
+    printf("\nSummary stats:\n");
     printf("--------------\n");
 
     // Summary stats for real execution time
@@ -230,8 +238,6 @@ int main(int argc, char **argv)
 
         for (j = 0; j < 4; j++) {
             size = matrix_sizes[j];
-
-            printf("\n* Set: (credits = %d, size = %d)\n", credits, size);
 
             // Compute mean of runs for *this* set
             mean = 0;
@@ -254,7 +260,7 @@ int main(int argc, char **argv)
 
             stdev = sqrt(stdev / k);
 
-            printf("*** Mean: %.6f, Stdev: %.6f\n", mean, stdev);
+            printf("* (credits = %3d, size = %3d) -- mean: %9.6f, stdev: %8.6f\n", credits, size, mean, stdev);
 
             idx += k;
         }
