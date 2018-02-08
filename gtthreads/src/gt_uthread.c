@@ -107,7 +107,7 @@ static int uthread_init(uthread_struct_t *u_new)
 	return 0;
 }
 
-extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kthread_runqueue_t *))
+extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kthread_runqueue_t *), int from_timer)
 {
 	kthread_context_t *k_ctx;
 	kthread_runqueue_t *kthread_runq;
@@ -169,6 +169,15 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 				ksched_info->kthread_cur_uthreads--;
 				gt_spin_unlock(&ksched_info->ksched_lock);
 			}
+
+            // If DONE AND did not come from timer event, jump to back to kthread wait state
+            if (ksched_shared_info.scheduler == GT_SCHED_CREDIT && !from_timer) {
+                /* Re-install the scheduling signal handlers */
+                kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
+                kthread_install_sighandler(SIGUSR1, k_ctx->kthread_sched_relay);
+
+                siglongjmp(k_ctx->kthread_env, 1);
+            }
 		}
 		else
 		{
@@ -177,7 +186,7 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 
             // If over credits, add to expired/over runqueue
             // Otherwise, put it back at the *tail* of the active runqueue
-            if (k_ctx->scheduler == GT_SCHED_CREDIT) {
+            if (ksched_shared_info.scheduler == GT_SCHED_CREDIT) {
                 if (u_obj->uthread_priority == UTHREAD_CREDIT_OVER)
                     add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
             } else {
@@ -195,9 +204,8 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 		}
 	}
 
-
     // If no uthread OR priority OR uthread is OVER OR DONE, find a new uthread!
-    if (k_ctx->scheduler == GT_SCHED_PRIORITY || !u_obj ||
+    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY || !u_obj ||
         u_obj->uthread_priority == UTHREAD_CREDIT_OVER ||
         (u_obj->uthread_state & UTHREAD_DONE)) {
         /* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
@@ -290,10 +298,10 @@ static void uthread_context_func(int signo)
 	cur_uthread->uthread_state = UTHREAD_DONE;
     cur_uthread->done_time = clock();
 
-    if (k_ctx->scheduler == GT_SCHED_PRIORITY)
-        uthread_schedule(&sched_find_best_uthread);
+    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+        uthread_schedule(&sched_find_best_uthread, 0);
     else
-        uthread_schedule(&credit_find_best_uthread);
+        uthread_schedule(&credit_find_best_uthread, 0);
 }
 
 /**********************************************************************/

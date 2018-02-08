@@ -201,8 +201,8 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 
 	while (u_thread != NULL) {
 		// Bump up credit count for any active uthreads
-        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
-            u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+//        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
+//            u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
 
 		// Get next uthread in queue
         u_thread = TAILQ_NEXT(u_thread, uthread_runq);
@@ -220,8 +220,8 @@ void update_credit_balances(kthread_context_t *k_ctx) {
         u_thread_next = TAILQ_NEXT(u_thread, uthread_runq);
 
         // Bump up credit count of any expired uthreads
-        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
-		    u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+//        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
+//		    u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
 
         // If OVER and credits > 0, move to active runq
         if (u_thread->uthread_priority == UTHREAD_CREDIT_OVER && u_thread->uthread_credits > 0) {
@@ -264,8 +264,8 @@ static void ksched_priority(int signo)
     #endif
 
     // Perform credit updates for ALL kthreads once every N ticks
-    if (cur_k_ctx->scheduler == GT_SCHED_CREDIT) {
-        if (++ksched_shared_info.num_ticks == 100) {
+    if (ksched_shared_info.scheduler == GT_SCHED_CREDIT) {
+        if (++ksched_shared_info.num_ticks == 10) {
             for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
                 if ((tmp_k_ctx = kthread_cpu_map[inx])) {
                     update_credit_balances(tmp_k_ctx);
@@ -293,10 +293,10 @@ static void ksched_priority(int signo)
 		}
 	}
 
-    if (cur_k_ctx->scheduler == GT_SCHED_PRIORITY)
-	    uthread_schedule(&sched_find_best_uthread);
+    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+	    uthread_schedule(&sched_find_best_uthread, 1);
     else
-        uthread_schedule(&credit_find_best_uthread);
+        uthread_schedule(&credit_find_best_uthread, 1);
 
 	// kthread_unblock_signal(SIGVTALRM);
 	// kthread_unblock_signal(SIGUSR1);
@@ -316,8 +316,6 @@ static void ksched_cosched(int signal)
 	 * [FOUND] Return. 
 	 * [[NOTE]] {uthread_select_criterion == match_uthread_group_id} */
 
-	kthread_context_t *cur_k_ctx;
-
 	// kthread_block_signal(SIGVTALRM);
 	// kthread_block_signal(SIGUSR1);
 
@@ -325,16 +323,14 @@ static void ksched_cosched(int signal)
 	 * picked by kernel for vtalrm signal.
 	 * USR1 signal has been relayed to it. */
 
-	cur_k_ctx = kthread_cpu_map[kthread_apic_id()];
-
 	#if DEBUG
 		fprintf(stderr, "kthread(%d) received the USR1 signal!\n", cur_k_ctx->cpuid);
     #endif
 
-    if (cur_k_ctx->scheduler == GT_SCHED_PRIORITY)
-        uthread_schedule(&sched_find_best_uthread);
+    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+        uthread_schedule(&sched_find_best_uthread, 1);
     else
-        uthread_schedule(&credit_find_best_uthread);
+        uthread_schedule(&credit_find_best_uthread, 1);
 
 	// kthread_unblock_signal(SIGVTALRM);
 	// kthread_unblock_signal(SIGUSR1);
@@ -378,7 +374,7 @@ static void gtthread_app_start(void *arg)
 
         // Only perform eager scheduling in PRIORITY mode!
         if (k_ctx->scheduler == GT_SCHED_PRIORITY)
-		    uthread_schedule(&sched_find_best_uthread);
+		    uthread_schedule(&sched_find_best_uthread, 1);
 //        else
 //            uthread_schedule(&credit_find_best_uthread);
 	}
@@ -507,8 +503,8 @@ extern void gtthread_app_exit()
 
 //        kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
 
-        if (k_ctx->scheduler == GT_SCHED_PRIORITY)
-		    uthread_schedule(&sched_find_best_uthread);
+        if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+		    uthread_schedule(&sched_find_best_uthread, 1);
 	}
 
 //    fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);

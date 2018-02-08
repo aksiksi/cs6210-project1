@@ -53,5 +53,6 @@ typedef struct uthread_struct
 } uthread_struct_t;
 
 struct __kthread_runqueue;
-extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(struct __kthread_runqueue *));
+extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(struct __kthread_runqueue *),
+                             int from_timer);
 #endif
