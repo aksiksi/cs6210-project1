@@ -20,7 +20,7 @@ add_library(gtthreads
         src/gt_uthread.c
         src/gt_uthread.h)
 
-target_compile_definitions(gtthreads PUBLIC -DDEBUG=0)
+target_compile_definitions(gtthreads PUBLIC -DDEBUG=1)
 
 # matrix
 add_executable(matrix src/gt_matrix.c)

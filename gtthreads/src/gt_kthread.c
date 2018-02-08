@@ -196,17 +196,17 @@ void update_credit_balances(kthread_context_t *k_ctx) {
 	uthread_struct_t *u_thread;
 
 	// Bump credits for all uthreads in the active queue
-	u_head = &kthread_runq->active_runq->prio_array[UTHREAD_CREDIT_UNDER].group[0];
-	u_thread = TAILQ_FIRST(u_head);
+//	u_head = &kthread_runq->active_runq->prio_array[UTHREAD_CREDIT_UNDER].group[0];
+//	u_thread = TAILQ_FIRST(u_head);
 
-	while (u_thread != NULL) {
+//	while (u_thread != NULL) {
 		// Bump up credit count for any active uthreads
 //        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
 //            u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
 
 		// Get next uthread in queue
-        u_thread = TAILQ_NEXT(u_thread, uthread_runq);
-	}
+//        u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+//	}
 
     // Get end of expired queue
     u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
@@ -220,20 +220,17 @@ void update_credit_balances(kthread_context_t *k_ctx) {
         u_thread_next = TAILQ_NEXT(u_thread, uthread_runq);
 
         // Bump up credit count of any expired uthreads
-//        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
-//		    u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+		u_thread->uthread_credits = UTHREAD_DEFAULT_CREDITS;
 
         // If OVER and credits > 0, move to active runq
-        if (u_thread->uthread_priority == UTHREAD_CREDIT_OVER && u_thread->uthread_credits > 0) {
-            // Remove from expired OVER queue
-            rem_from_runqueue(kthread_runq->expires_runq, lock, u_thread);
+		// Remove from expired OVER queue
+		rem_from_runqueue(kthread_runq->expires_runq, lock, u_thread);
 
-            // Set to UNDER
-            u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
+		// Set to UNDER
+		u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
 
-            // Now as UNDER!
-            add_to_runqueue(kthread_runq->active_runq, lock, u_thread);
-        }
+		// Now as UNDER!
+		add_to_runqueue(kthread_runq->active_runq, lock, u_thread);
 
         // Get next uthread in queue
         u_thread = u_thread_next;
@@ -264,20 +261,20 @@ static void ksched_priority(int signo)
     #endif
 
     // Perform credit updates for ALL kthreads once every N ticks
-    if (ksched_shared_info.scheduler == GT_SCHED_CREDIT) {
-        if (++ksched_shared_info.num_ticks == 10) {
-            for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
-                if ((tmp_k_ctx = kthread_cpu_map[inx])) {
-                    update_credit_balances(tmp_k_ctx);
-                }
-                else {
-                    break;
-                }
-            }
-
-            ksched_shared_info.num_ticks = 0;
-        }
-    }
+//    if (ksched_shared_info.scheduler == GT_SCHED_CREDIT) {
+//        if (++ksched_shared_info.num_ticks == 10) {
+//            for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+//                if ((tmp_k_ctx = kthread_cpu_map[inx])) {
+//                    update_credit_balances(tmp_k_ctx);
+//                }
+//                else {
+//                    break;
+//                }
+//            }
+//
+//            ksched_shared_info.num_ticks = 0;
+//        }
+//    }
 
 	/* Relay the signal to all other virtual processors(kthreads) */
 	for(inx=0; inx<GT_MAX_KTHREADS; inx++)
@@ -322,10 +319,6 @@ static void ksched_cosched(int signal)
 	/* This virtual processor (thread) was not
 	 * picked by kernel for vtalrm signal.
 	 * USR1 signal has been relayed to it. */
-
-	#if DEBUG
-		fprintf(stderr, "kthread(%d) received the USR1 signal!\n", cur_k_ctx->cpuid);
-    #endif
 
     if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
         uthread_schedule(&sched_find_best_uthread, 1);
@@ -395,7 +388,7 @@ extern void gtthread_app_init(kthread_sched_t sched)
 
     /* Num of logical processors (cpus/cores) */
     #if DEBUG
-        num_cpus = 4;
+        num_cpus = 1;
     #else
        num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
     #endif

@@ -41,6 +41,7 @@ typedef struct uthread_struct
     clock_t runnable_time;
     clock_t running_time;
     clock_t done_time;
+	double used_time;
 
 	void *exit_status; /* exit status */
 	int reserved1;
@@ -51,6 +52,32 @@ typedef struct uthread_struct
 	stack_t uthread_stack; /* 12 bytes : user-level thread stack */
 	TAILQ_ENTRY(uthread_struct) uthread_runq;
 } uthread_struct_t;
+
+typedef struct matrix
+{
+	// 2D array
+	int *arr;
+
+	int rows;
+	int cols;
+	unsigned int reserved[2];
+} matrix_t;
+
+typedef struct __uthread_arg
+{
+	// Compute A*A = C
+	matrix_t *_A, *_C;
+	unsigned int reserved0;
+
+	unsigned int tid;
+	unsigned int gid;
+
+	unsigned int credits; // Original num credits
+	struct timeval created; // Creation time (real)
+	struct timeval runtime; // Run time (real)
+	double used_time;
+	unsigned int size; // Matrix size
+} uthread_arg_t;
 
 struct __kthread_runqueue;
 extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(struct __kthread_runqueue *),

@@ -13,37 +13,12 @@
 
 #include "gt_include.h"
 
-#define NUM_THREADS 128
+#define NUM_THREADS 16
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
  * Let T(g, t) be thread 't' in group 'g'. 
  * T(g, t) is responsible for multiplication : 
  * A(rows)[(t-1)*SIZE -> (t*SIZE - 1)] X B(cols)[(g-1)*SIZE -> (g*SIZE - 1)] */
-
-typedef struct matrix
-{
-    // 2D array
-	int *arr;
-
-	int rows;
-	int cols;
-	unsigned int reserved[2];
-} matrix_t;
-
-typedef struct __uthread_arg
-{
-    // Compute A*A = C
-	matrix_t *_A, *_C;
-	unsigned int reserved0;
-
-	unsigned int tid;
-	unsigned int gid;
-
-	unsigned int credits; // Original num credits
-    struct timeval created; // Creation time (real)
-    struct timeval runtime; // Run time (real)
-    unsigned int size; // Matrix size
-} uthread_arg_t;
 
 /* Generates a square 2D matrix; returns pointer */
 static matrix_t *generate_matrix(int size, int val) {
@@ -91,7 +66,7 @@ static void uthread_mulmat(void *p)
 
 #define ptr ((uthread_arg_t *)p)
 
-	cpuid = kthread_cpu_map[kthread_apic_id()]->cpuid;
+	kthread_context_t *k_ctx = kthread_cpu_map[kthread_apic_id()];
 
 	#if DEBUG
 	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) started\n",ptr->tid, ptr->gid, cpuid);
@@ -115,7 +90,6 @@ static void uthread_mulmat(void *p)
     struct timeval tv2;
     gettimeofday(&tv2, NULL);
     timersub(&tv2, &ptr->created, &ptr->runtime);
-
 
     #if DEBUG
     fprintf(stderr, "Thread(id:%d, credits: %d, size: %d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
@@ -195,6 +169,7 @@ int main(int argc, char **argv)
 
 				uarg->tid = (unsigned)idx;
 				uarg->gid = 0;
+                uarg->used_time = 0;
 				uarg->credits = credits;
                 uarg->size = size;
 
@@ -244,6 +219,7 @@ int main(int argc, char **argv)
             for (k = 0; k < (NUM_THREADS/16); k++) {
                 // uthread elapsed time in s
                 runtime = uargs[idx + k].runtime.tv_sec + (uargs[idx + k].runtime.tv_usec / 1000000.0);
+//                runtime = uargs[idx + k].used_time / 1000000.0;
                 mean += runtime;
             }
 
@@ -254,12 +230,13 @@ int main(int argc, char **argv)
 
             for (k = 0; k < (NUM_THREADS/16); k++) {
                 runtime = uargs[idx + k].runtime.tv_sec + (uargs[idx + k].runtime.tv_usec / 1000000.0);
+//                runtime = uargs[idx + k].used_time / 1000000.0;
                 stdev += pow(fabs(runtime - mean), 2);
             }
 
             stdev = sqrt(stdev / k);
 
-            printf("* (credits = %3d, size = %3d) -- mean: %9.6f, stdev: %8.6f\n", credits, size, mean, stdev);
+            printf("* (credits = %3d, size = %3d) -- mean: %9.6f, stdev: %8.8f\n", credits, size, mean, stdev);
 
             idx += k;
         }
