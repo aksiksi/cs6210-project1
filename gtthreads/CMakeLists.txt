@@ -27,4 +27,4 @@ add_executable(matrix src/gt_matrix.c)
 
 add_dependencies(matrix gtthreads)
 
-target_link_libraries(matrix gtthreads)
+target_link_libraries(matrix gtthreads m)

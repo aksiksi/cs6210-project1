@@ -40,11 +40,10 @@ typedef struct __uthread_arg
 	unsigned int gid;
 
 	unsigned int credits; // Original num credits
+    struct timeval created; // Creation time (real)
     struct timeval runtime; // Run time (real)
     unsigned int size; // Matrix size
 } uthread_arg_t;
-	
-struct timeval tv1;
 
 /* Generates a square 2D matrix; returns pointer */
 static matrix_t *generate_matrix(int size, int val) {
@@ -115,7 +114,7 @@ static void uthread_mulmat(void *p)
 
     struct timeval tv2;
     gettimeofday(&tv2, NULL);
-    timersub(&tv2, &tv1, &ptr->runtime);
+    timersub(&tv2, &ptr->created, &ptr->runtime);
 
 
     #if DEBUG
@@ -160,8 +159,6 @@ int main(int argc, char **argv)
 	gtthread_app_init(sched);
 
     printf("Initialized gtthreads library!\n");
-
-	gettimeofday(&tv1, NULL);
 	
 	// 1 matrix per thread => 1 output ("squaring")
 	matrix_t *input_matrices[NUM_THREADS];
@@ -177,15 +174,15 @@ int main(int argc, char **argv)
 
     int idx = 0;
 
-    printf("Spawning threads...\n");
+    printf("Spawning %d threads...\n", NUM_THREADS);
 
     for (i = 0; i < 4; i++) {
-        // For each credit type
-        credits = credit_values[i];
+        // For each size
+        size = matrix_sizes[i];
 
-        for (j = 0; j < 4; j++) {
-            // For each size
-            size = matrix_sizes[j];
+        for (j = 3; j >= 0; j--) {
+            // For each credit type
+            credits = credit_values[j];
 
             // Create 8 threads for each class of (credits, size)
             for (k = 0; k < (NUM_THREADS/16); k++) {
@@ -200,6 +197,8 @@ int main(int argc, char **argv)
 				uarg->gid = 0;
 				uarg->credits = credits;
                 uarg->size = size;
+
+                gettimeofday(&uarg->created, NULL);
 
 				uthread_create(&utids[idx], uthread_mulmat, uarg, uarg->gid, credits);
 
@@ -234,10 +233,10 @@ int main(int argc, char **argv)
 
     // Summary stats for real execution time
     for (i = 0; i < 4; i++) {
-        credits = credit_values[i];
+        size = matrix_sizes[i];
 
         for (j = 0; j < 4; j++) {
-            size = matrix_sizes[j];
+            credits = credit_values[j];
 
             // Compute mean of runs for *this* set
             mean = 0;

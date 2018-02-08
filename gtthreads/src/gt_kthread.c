@@ -144,6 +144,7 @@ static inline void ksched_info_init(ksched_shared_info_t *ksched_info, kthread_s
 	gt_spinlock_init(&(ksched_info->__malloc_lock));
 
 	ksched_info->scheduler = sched;
+    ksched_info->num_ticks = 0;
 	
 	return;
 }
@@ -262,12 +263,19 @@ static void ksched_priority(int signo)
         fprintf(stderr, "kthread(%d) entered credit scheduler!\n", cur_k_ctx->cpuid);
     #endif
 
-    // Perform credit updates for ALL kthreads
+    // Perform credit updates for ALL kthreads once every N ticks
     if (cur_k_ctx->scheduler == GT_SCHED_CREDIT) {
-        for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
-            if ((tmp_k_ctx = kthread_cpu_map[inx])) {
-                update_credit_balances(tmp_k_ctx);
+        if (++ksched_shared_info.num_ticks == 100) {
+            for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+                if ((tmp_k_ctx = kthread_cpu_map[inx])) {
+                    update_credit_balances(tmp_k_ctx);
+                }
+                else {
+                    break;
+                }
             }
+
+            ksched_shared_info.num_ticks = 0;
         }
     }
 

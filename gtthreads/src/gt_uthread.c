@@ -180,8 +180,6 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
             if (k_ctx->scheduler == GT_SCHED_CREDIT) {
                 if (u_obj->uthread_priority == UTHREAD_CREDIT_OVER)
                     add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
-                else
-                    add_to_runqueue(kthread_runq->active_runq, &(kthread_runq->kthread_runqlock), u_obj);
             } else {
                 // For priority: just expire!
                 add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
@@ -197,16 +195,24 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 		}
 	}
 
-	/* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
-	if (!(u_obj = kthread_best_sched_uthread(kthread_runq)))
-	{
-        if(ksched_shared_info.kthread_tot_uthreads && k_ctx->cpuid == 0) {
-            k_ctx->kthread_flags |= KTHREAD_DONE;
-        }
 
-		siglongjmp(k_ctx->kthread_env, 1);
-		return;
-	}
+    // If no uthread OR priority OR uthread is OVER OR DONE, find a new uthread!
+    if (k_ctx->scheduler == GT_SCHED_PRIORITY || !u_obj ||
+        u_obj->uthread_priority == UTHREAD_CREDIT_OVER ||
+        (u_obj->uthread_state & UTHREAD_DONE)) {
+        /* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
+        if (!(u_obj = kthread_best_sched_uthread(kthread_runq))) {
+            if (ksched_shared_info.kthread_tot_uthreads && k_ctx->cpuid == 0) {
+                k_ctx->kthread_flags |= KTHREAD_DONE;
+            }
+
+            siglongjmp(k_ctx->kthread_env, 1);
+            return;
+        }
+    } else {
+        // Otherwise, use the one you have!
+        // PASS
+    }
 
     #if DEBUG
     fprintf(stderr, "kthread(%d) found a new baby! -> uthread(%d), state=%d\n",
