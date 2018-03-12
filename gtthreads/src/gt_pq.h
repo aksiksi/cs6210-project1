@@ -70,12 +70,12 @@ extern void rem_from_runqueue(runqueue_t *runq, gt_spinlock_t *runq_lock, uthrea
 extern void switch_runqueue(runqueue_t *from_runq, gt_spinlock_t *from_runqlock, 
 				runqueue_t *to_runq, gt_spinlock_t *to_runqlock, uthread_struct_t *u_elem);
 
-
 /* kthread runqueue */
 extern void kthread_init_runqueue(kthread_runqueue_t *kthread_runq);
 
 /* Find the highest priority uthread.
  * Called by kthread handling VTALRM. */
+extern uthread_struct_t *credit_find_best_uthread(kthread_runqueue_t *kthread_runq);
 extern uthread_struct_t *sched_find_best_uthread(kthread_runqueue_t *kthread_runq);
 
 /* Find the highest priority uthread from uthread_group u_gid.

@@ -8,6 +8,16 @@
 
 typedef unsigned int kthread_t;
 
+/*
+	Types of schedulers supported by the library:
+		- PRIORITY: O(1) priority scheduler
+		- CREDIT: Xen's credit scheduler
+*/ 
+typedef enum {
+	GT_SCHED_PRIORITY = 0,
+	GT_SCHED_CREDIT
+} kthread_sched_t;
+
 /**********************************************************************/
 /* kthread_context */
 
@@ -22,6 +32,7 @@ typedef struct __kthread_context
 	unsigned int tid;
 
 	unsigned int kthread_flags;
+	kthread_sched_t scheduler; /* Selected scheduler (PRIORITY or CREDIT) */
 	void (*kthread_app_func)(void *); /* kthread application function */
 	void (*kthread_sched_timer)(int); /* vtalrm signal handler */
 	void (*kthread_sched_relay)(int); /* relay(usr1) signal handler*/
@@ -58,6 +69,9 @@ typedef struct __ksched_shared_info
 
 	gt_spinlock_t ksched_lock; /* global lock for updating above counters */
 	gt_spinlock_t uthread_init_lock; /* global lock for uthread_init (to serialize signal handling stuff in there) */
+
+	kthread_sched_t scheduler; // Type of scheduler, accessible on uthread creation
+	unsigned int num_ticks; // Number of credit sched ticks -- used for bumping
 
 	gt_spinlock_t __malloc_lock; /* making malloc thread-safe (check particular glibc to see if needed) */
 	unsigned int reserved[2];
@@ -116,7 +130,7 @@ static inline void *MALLOCZ_SAFE(unsigned int size)
 
 /**********************************************************************/
 /* gt-thread api(s) */
-extern void gtthread_app_init();
+extern void gtthread_app_init(kthread_sched_t sched);
 extern void gtthread_app_exit();
 
 #endif

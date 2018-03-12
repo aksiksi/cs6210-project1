@@ -9,175 +9,239 @@
 #include <setjmp.h>
 #include <errno.h>
 #include <assert.h>
+#include <math.h>
 
 #include "gt_include.h"
 
-
-#define ROWS 512
-#define COLS ROWS
-#define SIZE COLS
-
-#define NUM_CPUS 2
-#define NUM_GROUPS NUM_CPUS
-#define PER_GROUP_COLS (SIZE/NUM_GROUPS)
-
-#define NUM_THREADS 32
-#define PER_THREAD_ROWS (SIZE/NUM_THREADS)
-
+#define NUM_THREADS 16
 
 /* A[SIZE][SIZE] X B[SIZE][SIZE] = C[SIZE][SIZE]
  * Let T(g, t) be thread 't' in group 'g'. 
  * T(g, t) is responsible for multiplication : 
  * A(rows)[(t-1)*SIZE -> (t*SIZE - 1)] X B(cols)[(g-1)*SIZE -> (g*SIZE - 1)] */
 
-typedef struct matrix
-{
-	int m[SIZE][SIZE];
+/* Generates a square 2D matrix; returns pointer */
+static matrix_t *generate_matrix(int size, int val) {
+    int i, j;
 
-	int rows;
-	int cols;
-	unsigned int reserved[2];
-} matrix_t;
+    // Allocate a matrix
+    matrix_t *m = (matrix_t *)MALLOC_SAFE(sizeof(matrix_t));
 
+    // Allocate entire matrix as single block
+    m->arr = (int *)MALLOC_SAFE(size * size * sizeof(int));
 
-typedef struct __uthread_arg
-{
-	matrix_t *_A, *_B, *_C;
-	unsigned int reserved0;
+    int *row;
 
-	unsigned int tid;
-	unsigned int gid;
-	int start_row; /* start_row -> (start_row + PER_THREAD_ROWS) */
-	int start_col; /* start_col -> (start_col + PER_GROUP_COLS) */
-	
-}uthread_arg_t;
-	
-struct timeval tv1;
+    // Fill with val
+    for (i = 0; i < size; i++)
+        for (j = 0, row = m->arr + i * size; j < size; j++)
+            row[j] = val;
 
-static void generate_matrix(matrix_t *mat, int val)
-{
+    m->rows = size;
+    m->cols = size;
 
-	int i,j;
-	mat->rows = SIZE;
-	mat->cols = SIZE;
-	for(i = 0; i < mat->rows;i++)
-		for( j = 0; j < mat->cols; j++ )
-		{
-			mat->m[i][j] = val;
-		}
-	return;
+	return m;
 }
 
 static void print_matrix(matrix_t *mat)
 {
 	int i, j;
 
-	for(i=0;i<SIZE;i++)
+	for(i=0;i<mat->rows;i++)
 	{
-		for(j=0;j<SIZE;j++)
-			printf(" %d ",mat->m[i][j]);
+        int *row = mat->arr + i * mat->rows;
+
+        for(j=0;j<mat->cols;j++)
+			printf("%d ",row[j]);
 		printf("\n");
 	}
 
 	return;
 }
 
-static void * uthread_mulmat(void *p)
+static void uthread_mulmat(void *p)
 {
 	int i, j, k;
-	int start_row, end_row;
-	int start_col, end_col;
 	unsigned int cpuid;
-	struct timeval tv2;
 
 #define ptr ((uthread_arg_t *)p)
 
-	i=0; j= 0; k=0;
+	kthread_context_t *k_ctx = kthread_cpu_map[kthread_apic_id()];
 
-	start_row = ptr->start_row;
-	end_row = (ptr->start_row + PER_THREAD_ROWS);
+	#if DEBUG
+	fprintf(stderr, "Thread(id:%d, group:%d, cpu:%d) started\n",ptr->tid, ptr->gid, cpuid);
+	#endif
 
-#ifdef GT_GROUP_SPLIT
-	start_col = ptr->start_col;
-	end_col = (ptr->start_col + PER_THREAD_ROWS);
-#else
-	start_col = 0;
-	end_col = SIZE;
-#endif
+    int *r1, *r2, *c1;
+    int size = ptr->_A->rows;
 
-#ifdef GT_THREADS
-	cpuid = kthread_cpu_map[kthread_apic_id()]->cpuid;
-	fprintf(stderr, "\nThread(id:%d, group:%d, cpu:%d) started",ptr->tid, ptr->gid, cpuid);
-#else
-	fprintf(stderr, "\nThread(id:%d, group:%d) started",ptr->tid, ptr->gid);
-#endif
+	for(i = 0; i < size; i++) {
+        r1 = ptr->_A->arr + i * ptr->_A->rows;
+        r2 = ptr->_C->arr + i * ptr->_C->rows;
 
-	for(i = start_row; i < end_row; i++)
-		for(j = start_col; j < end_col; j++)
-			for(k = 0; k < SIZE; k++)
-				ptr->_C->m[i][j] += ptr->_A->m[i][k] * ptr->_B->m[k][j];
+        for(j = 0; j < size; j++) {
+            for(k = 0; k < size; k++) {
+                c1 = ptr->_A->arr + k * ptr->_A->rows;
+                r2[j] += r1[k] * c1[j];
+            }
+        }
+    }
 
-#ifdef GT_THREADS
-	fprintf(stderr, "\nThread(id:%d, group:%d, cpu:%d) finished (TIME : %lu s and %lu us)",
-			ptr->tid, ptr->gid, cpuid, (tv2.tv_sec - tv1.tv_sec), (tv2.tv_usec - tv1.tv_usec));
-#else
-	gettimeofday(&tv2,NULL);
-	fprintf(stderr, "\nThread(id:%d, group:%d) finished (TIME : %lu s and %lu us)",
-			ptr->tid, ptr->gid, (tv2.tv_sec - tv1.tv_sec), (tv2.tv_usec - tv1.tv_usec));
-#endif
+    struct timeval tv2;
+    gettimeofday(&tv2, NULL);
+    timersub(&tv2, &ptr->created, &ptr->runtime);
 
+    #if DEBUG
+    fprintf(stderr, "Thread(id:%d, credits: %d, size: %d, cpu:%d) finished (TIME : %lu s and %lu us)\n",
+			ptr->tid, ptr->credits, ptr->_A->rows, cpuid, ptr->runtime.tv_sec, ptr->runtime.tv_usec);
+    #endif
 #undef ptr
-	return 0;
 }
 
-matrix_t A, B, C;
-
-static void init_matrices()
-{
-	generate_matrix(&A, 1);
-	generate_matrix(&B, 1);
-	generate_matrix(&C, 0);
-
-	return;
+void free_matrix(matrix_t *m) {
+	if (m) {
+		free(m->arr);
+    	free(m);
+	}
 }
-
 
 uthread_arg_t uargs[NUM_THREADS];
 uthread_t utids[NUM_THREADS];
 
-int main()
+int main(int argc, char **argv)
 {
+    kthread_sched_t sched;
+
+    // Get scheduler to use
+    if (argc == 2) {
+        long v = strtol(argv[1], NULL, 10);
+
+        if (v == 0) sched = GT_SCHED_PRIORITY;
+        else sched = GT_SCHED_CREDIT;
+    } else {
+        printf("Usage: matrix [0=PRIORITY/1=CREDIT]\n");
+        exit(0);
+    }
+
+    if (sched)
+        printf("Scheduler: CREDIT\n");
+    else
+        printf("Scheduler: PRIORITY\n");
+
 	uthread_arg_t *uarg;
-	int inx;
 
+	gtthread_app_init(sched);
 
-	gtthread_app_init();
+    printf("Initialized gtthreads library!\n");
+	
+	// 1 matrix per thread => 1 output ("squaring")
+	matrix_t *input_matrices[NUM_THREADS];
+	matrix_t *output_matrices[NUM_THREADS];
 
-	init_matrices();
+    int i, j, k;
 
-	gettimeofday(&tv1,NULL);
+    int credit_values[4] = {25, 50, 75, 100};
+    int credits;
 
-	for(inx=0; inx<NUM_THREADS; inx++)
-	{
-		uarg = &uargs[inx];
-		uarg->_A = &A;
-		uarg->_B = &B;
-		uarg->_C = &C;
+    int matrix_sizes[4] = {64, 128, 256, 512};
+    int size;
 
-		uarg->tid = inx;
+    int idx = 0;
 
-		uarg->gid = (inx % NUM_GROUPS);
+    printf("Spawning %d threads...\n", NUM_THREADS);
 
-		uarg->start_row = (inx * PER_THREAD_ROWS);
-#ifdef GT_GROUP_SPLIT
-		/* Wanted to split the columns by groups !!! */
-		uarg->start_col = (uarg->gid * PER_GROUP_COLS);
-#endif
+    for (i = 0; i < 4; i++) {
+        // For each size
+        size = matrix_sizes[i];
 
-		uthread_create(&utids[inx], uthread_mulmat, uarg, uarg->gid);
+        for (j = 3; j >= 0; j--) {
+            // For each credit type
+            credits = credit_values[j];
+
+            // Create 8 threads for each class of (credits, size)
+            for (k = 0; k < (NUM_THREADS/16); k++) {
+				input_matrices[idx] = generate_matrix(size, 1);
+				output_matrices[idx] = generate_matrix(size, 0);
+
+				uarg = &uargs[idx];
+				uarg->_A = input_matrices[idx];
+				uarg->_C = output_matrices[idx];
+
+				uarg->tid = (unsigned)idx;
+				uarg->gid = 0;
+                uarg->used_time = 0;
+				uarg->credits = credits;
+                uarg->size = size;
+
+                gettimeofday(&uarg->created, NULL);
+
+				uthread_create(&utids[idx], uthread_mulmat, uarg, uarg->gid, credits);
+
+				idx++;
+			}
+        }
 	}
+	
+	assert(idx == NUM_THREADS);
+
+    printf("Executing threads...\n");
 
 	gtthread_app_exit();
+
+	// Matrix cleanup
+    matrix_t *m;
+
+    for (i = 0; i < NUM_THREADS; i++) {
+        m = input_matrices[i];
+        free_matrix(m);
+        m = output_matrices[i];
+        free_matrix(m);
+    }
+
+    double mean, stdev;
+    double runtime;
+
+    idx = 0;
+
+    printf("\nSummary stats:\n");
+    printf("--------------\n");
+
+    // Summary stats for real execution time
+    for (i = 0; i < 4; i++) {
+        size = matrix_sizes[i];
+
+        for (j = 0; j < 4; j++) {
+            credits = credit_values[j];
+
+            // Compute mean of runs for *this* set
+            mean = 0;
+
+            for (k = 0; k < (NUM_THREADS/16); k++) {
+                // uthread elapsed time in s
+                runtime = uargs[idx + k].runtime.tv_sec + (uargs[idx + k].runtime.tv_usec / 1000000.0);
+//                runtime = uargs[idx + k].used_time / 1000000.0;
+                mean += runtime;
+            }
+
+            mean /= k;
+
+            // Compute stdev for this set
+            stdev = 0;
+
+            for (k = 0; k < (NUM_THREADS/16); k++) {
+                runtime = uargs[idx + k].runtime.tv_sec + (uargs[idx + k].runtime.tv_usec / 1000000.0);
+//                runtime = uargs[idx + k].used_time / 1000000.0;
+                stdev += pow(fabs(runtime - mean), 2);
+            }
+
+            stdev = sqrt(stdev / k);
+
+            printf("* (credits = %3d, size = %3d) -- mean: %9.6f, stdev: %8.8f\n", credits, size, mean, stdev);
+
+            idx += k;
+        }
+    }
+
 
 	// print_matrix(&C);
 	// fprintf(stderr, "********************************");

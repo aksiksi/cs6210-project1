@@ -58,7 +58,7 @@ extern void kthread_unblock_signal(int signo)
 	return;
 }
 
-extern void kthread_init_vtalrm_timeslice()
+extern int kthread_init_vtalrm_timeslice()
 {
 	struct itimerval timeslice;
 
@@ -67,7 +67,6 @@ extern void kthread_init_vtalrm_timeslice()
 	timeslice.it_value.tv_sec = KTHREAD_VTALRM_SEC;
 	timeslice.it_value.tv_usec = KTHREAD_VTALRM_USEC;
 
-	setitimer(ITIMER_VIRTUAL,&timeslice,NULL);
-	return;
+	return setitimer(ITIMER_VIRTUAL,&timeslice,NULL);
 }
 

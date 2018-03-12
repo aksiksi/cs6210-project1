@@ -29,9 +29,9 @@ static int uthread_init(uthread_struct_t *u_new);
 
 /**********************************************************************/
 /* uthread creation */
-#define UTHREAD_DEFAULT_SSIZE (16 * 1024)
+#define UTHREAD_DEFAULT_SSIZE (32 * 1024)
 
-extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid);
+extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid, int credits);
 
 /**********************************************************************/
 /** DEFNITIONS **/
@@ -55,14 +55,14 @@ static int uthread_init(uthread_struct_t *u_new)
 	act.sa_flags = (SA_ONSTACK | SA_RESTART);
 	if(sigaction(SIGUSR2,&act,&oldact))
 	{
-		fprintf(stderr, "uthread sigusr2 install failed !!");
+		fprintf(stderr, "uthread sigusr2 install failed !!\n");
 		return -1;
 	}
 
 	/* Install alternate signal stack (for SIGUSR2) */
 	if(sigaltstack(&(u_new->uthread_stack), &oldstack))
 	{
-		fprintf(stderr, "uthread sigaltstack install failed.");
+		fprintf(stderr, "uthread sigaltstack install failed.\n");
 		return -1;
 	}
 
@@ -70,7 +70,6 @@ static int uthread_init(uthread_struct_t *u_new)
 	sigemptyset(&set);
 	sigaddset(&set, SIGUSR2);
 	sigprocmask(SIG_UNBLOCK, &set, &oldset);
-
 
 	/* SIGUSR2 handler expects kthread_runq->cur_uthread
 	 * to point to the newly created thread. We will temporarily
@@ -90,7 +89,7 @@ static int uthread_init(uthread_struct_t *u_new)
 	sigprocmask(SIG_BLOCK, &set, &oldset);
 	if(sigaction(SIGUSR2,&oldact,NULL))
 	{
-		fprintf(stderr, "uthread sigusr2 revert failed !!");
+		fprintf(stderr, "uthread sigusr2 revert failed !!\n");
 		return -1;
 	}
 
@@ -100,7 +99,7 @@ static int uthread_init(uthread_struct_t *u_new)
 	/* Restore the old stack/signal handling */
 	if(sigaltstack(&oldstack, NULL))
 	{
-		fprintf(stderr, "uthread sigaltstack revert failed.");
+		fprintf(stderr, "uthread sigaltstack revert failed.\n");
 		return -1;
 	}
 
@@ -108,7 +107,7 @@ static int uthread_init(uthread_struct_t *u_new)
 	return 0;
 }
 
-extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kthread_runqueue_t *))
+extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kthread_runqueue_t *), int from_timer)
 {
 	kthread_context_t *k_ctx;
 	kthread_runqueue_t *kthread_runq;
@@ -118,19 +117,48 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 	// kthread_block_signal(SIGVTALRM);
 	// kthread_block_signal(SIGUSR1);
 
-#if 0
-	fprintf(stderr, "uthread_schedule invoked !!\n");
-#endif
-
 	k_ctx = kthread_cpu_map[kthread_apic_id()];
 	kthread_runq = &(k_ctx->krunqueue);
 
+    #if 0
+    fprintf(stderr, "kthread(%d) has entered!\n", k_ctx->cpuid);
+    #endif
+
 	if((u_obj = kthread_runq->cur_uthread))
 	{
-		/*Go through the runq and schedule the next thread to run */
+		/* Go through the runq and schedule the next thread to run */
 		kthread_runq->cur_uthread = NULL;
+
+        // Deduct credits for the dude who already ran!
+        if (k_ctx->scheduler == GT_SCHED_CREDIT && (u_obj->uthread_state == UTHREAD_RUNNING)) {
+            /* If credit enabled, deduct credits based on current uthread run time. */
+			// Compute used time in nanoseconds
+			double used_time = (double)(clock() - u_obj->running_time) / (CLOCKS_PER_SEC / 1000000.0);
+            double credit_penalty = (used_time / KTHREAD_VTALRM_USEC) * UTHREAD_DEFAULT_CREDITS;
+
+			u_obj->used_time += used_time;
+
+			// Store used-time in the uarg
+			uthread_arg_t *u_arg = (uthread_arg_t *)u_obj->uthread_arg;
+			u_arg->used_time = u_obj->used_time;
+
+			u_obj->uthread_credits -= credit_penalty;
+
+            if (u_obj->uthread_credits < 0)
+                u_obj->uthread_priority = UTHREAD_CREDIT_OVER;
+            else
+                u_obj->uthread_priority = UTHREAD_CREDIT_UNDER;
+
+            #if DEBUG
+            fprintf(stderr, "Deducted %.3f credits from uthread(%d) -- used %.3f\n",
+                    credit_penalty,
+                    u_obj->uthread_tid, u_obj->used_time);
+            if (credit_penalty < 5)
+                fprintf(stderr, "\n");
+            #endif
+        }
 		
-		if(u_obj->uthread_state & (UTHREAD_DONE | UTHREAD_CANCELLED))
+		if (u_obj->uthread_state & (UTHREAD_DONE | UTHREAD_CANCELLED))
 		{
 			/* XXX: Inserting uthread into zombie queue is causing improper
 			 * cleanup/exit of uthread (core dump) */
@@ -141,31 +169,75 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 			gt_spin_unlock(&(kthread_runq->kthread_runqlock));
 		
 			{
-				ksched_shared_info_t *ksched_info = &ksched_shared_info;	
+				ksched_shared_info_t *ksched_info = &ksched_shared_info;
 				gt_spin_lock(&ksched_info->ksched_lock);
 				ksched_info->kthread_cur_uthreads--;
 				gt_spin_unlock(&ksched_info->ksched_lock);
 			}
+
+            // If DONE AND did not come from timer event, jump to back to kthread wait state
+//            if (ksched_shared_info.scheduler == GT_SCHED_CREDIT && !from_timer) {
+//                /* Re-install the scheduling signal handlers */
+//                kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
+//                kthread_install_sighandler(SIGUSR1, k_ctx->kthread_sched_relay);
+//
+//                siglongjmp(k_ctx->kthread_env, 1);
+//            }
 		}
 		else
 		{
 			/* XXX: Apply uthread_group_penalty before insertion */
 			u_obj->uthread_state = UTHREAD_RUNNABLE;
-			add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
+
+            // If over credits, add to expired/over runqueue
+            // Otherwise, put it back at the *tail* of the active runqueue
+            if (ksched_shared_info.scheduler == GT_SCHED_CREDIT) {
+                if (u_obj->uthread_priority == UTHREAD_CREDIT_OVER) {
+					// Refresh credits before inserting into OVER queue
+					u_obj->uthread_priority = UTHREAD_CREDIT_UNDER;
+					u_obj->uthread_credits = u_obj->uthread_original_credits;
+
+					add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
+				}
+
+				else {
+					add_to_runqueue(kthread_runq->active_runq, &(kthread_runq->kthread_runqlock), u_obj);
+				}
+            } else {
+                // For priority: just expire!
+                add_to_runqueue(kthread_runq->expires_runq, &(kthread_runq->kthread_runqlock), u_obj);
+            }
+
+            #if DEBUG
+            fprintf(stderr, "Returning uthread(%d) to queue\n", u_obj->uthread_tid);
+            #endif
+
 			/* XXX: Save the context (signal mask not saved) */
 			if(sigsetjmp(u_obj->uthread_env, 0))
 				return;
 		}
 	}
 
-	/* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
-	if(!(u_obj = kthread_best_sched_uthread(kthread_runq)))
-	{
-		/* Done executing all uthreads. Return to main */
-		/* XXX: We can actually get rid of KTHREAD_DONE flag */
-		if(ksched_shared_info.kthread_tot_uthreads && !ksched_shared_info.kthread_cur_uthreads)
-		{
-			fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
+    // If no uthread OR priority OR uthread is OVER OR DONE, find a new uthread!
+//    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY || !u_obj ||
+//        u_obj->uthread_priority == UTHREAD_CREDIT_OVER ||
+//        (u_obj->uthread_state & UTHREAD_DONE)) {
+//        /* kthread_best_sched_uthread acquires kthread_runqlock. Dont lock it up when calling the function. */
+//        if (!(u_obj = kthread_best_sched_uthread(kthread_runq))) {
+//            if (ksched_shared_info.kthread_tot_uthreads && k_ctx->cpuid == 0) {
+//                k_ctx->kthread_flags |= KTHREAD_DONE;
+//            }
+//
+//            siglongjmp(k_ctx->kthread_env, 1);
+//            return;
+//        }
+//    } else {
+//        // Otherwise, use the one you have!
+//        // PASS
+//    }
+
+	if (!(u_obj = kthread_best_sched_uthread(kthread_runq))) {
+		if (ksched_shared_info.kthread_tot_uthreads && k_ctx->cpuid == 0) {
 			k_ctx->kthread_flags |= KTHREAD_DONE;
 		}
 
@@ -173,18 +245,26 @@ extern void uthread_schedule(uthread_struct_t * (*kthread_best_sched_uthread)(kt
 		return;
 	}
 
+    #if DEBUG
+    fprintf(stderr, "kthread(%d) found a new baby! -> uthread(%d), state=%d\n",
+            k_ctx->cpuid, u_obj->uthread_tid, u_obj->uthread_state);
+    #endif
+
 	kthread_runq->cur_uthread = u_obj;
-	if((u_obj->uthread_state == UTHREAD_INIT) && (uthread_init(u_obj)))
+
+    if((u_obj->uthread_state == UTHREAD_INIT) && (uthread_init(u_obj)))
 	{
 		fprintf(stderr, "uthread_init failed on kthread(%d)\n", k_ctx->cpuid);
 		exit(0);
 	}
 
 	u_obj->uthread_state = UTHREAD_RUNNING;
+    u_obj->running_time = clock();
 	
 	/* Re-install the scheduling signal handlers */
 	kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
 	kthread_install_sighandler(SIGUSR1, k_ctx->kthread_sched_relay);
+
 	/* Jump to the selected uthread context */
 	siglongjmp(u_obj->uthread_env, 1);
 
@@ -200,9 +280,15 @@ static void uthread_context_func(int signo)
 	uthread_struct_t *cur_uthread;
 	kthread_runqueue_t *kthread_runq;
 
-	kthread_runq = &(kthread_cpu_map[kthread_apic_id()]->krunqueue);
+    kthread_context_t *k_ctx = kthread_cpu_map[kthread_apic_id()];
+	kthread_runq = &(k_ctx->krunqueue);
 
-	printf("..... uthread_context_func .....\n");
+    #if 0
+    fprintf(stderr, "..... uthread_context_func (STATE=%d, T=%d) .....\n",
+            kthread_runq->cur_uthread->uthread_state,
+            (int)clock());
+    #endif
+	
 	/* kthread->cur_uthread points to newly created uthread */
 	if(!sigsetjmp(kthread_runq->cur_uthread->uthread_env,0))
 	{
@@ -211,18 +297,34 @@ static void uthread_context_func(int signo)
 		/* DONT USE any locks here !! */
 		assert(kthread_runq->cur_uthread->uthread_state == UTHREAD_INIT);
 		kthread_runq->cur_uthread->uthread_state = UTHREAD_RUNNABLE;
+        kthread_runq->cur_uthread->runnable_time = clock();
+        #if 0
+        fprintf(stderr, "..... uthread_context_func (STATE=%d, T=%d) .....\n",
+                kthread_runq->cur_uthread->uthread_state,
+                (int)clock());
+        #endif
 		return;
 	}
 
 	/* UTHREAD_RUNNING : siglongjmp was executed. */
 	cur_uthread = kthread_runq->cur_uthread;
 	assert(cur_uthread->uthread_state == UTHREAD_RUNNING);
-	/* Execute the uthread task */
+
+    #if 0
+        fprintf(stderr, "..... uthread_context_func (STATE=%d, T=%d) .....\n",
+                kthread_runq->cur_uthread->uthread_state,
+                (int)clock());
+    #endif
+
+    /* Execute the uthread task */
 	cur_uthread->uthread_func(cur_uthread->uthread_arg);
 	cur_uthread->uthread_state = UTHREAD_DONE;
+    cur_uthread->done_time = clock();
 
-	uthread_schedule(&sched_find_best_uthread);
-	return;
+    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+        uthread_schedule(&sched_find_best_uthread, 0);
+    else
+        uthread_schedule(&credit_find_best_uthread, 0);
 }
 
 /**********************************************************************/
@@ -230,7 +332,7 @@ static void uthread_context_func(int signo)
 
 extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *);
 
-extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid)
+extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, uthread_group_t u_gid, int credits)
 {
 	kthread_runqueue_t *kthread_runq;
 	uthread_struct_t *u_new;
@@ -247,7 +349,10 @@ extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, 
 	}
 
 	u_new->uthread_state = UTHREAD_INIT;
-	u_new->uthread_priority = DEFAULT_UTHREAD_PRIORITY;
+    u_new->init_time = clock();
+	u_new->used_time = 0;
+    u_new->uthread_original_credits = credits;
+	u_new->uthread_credits = credits; // Used only by credit scheduler
 	u_new->uthread_gid = u_gid;
 	u_new->uthread_func = u_func;
 	u_new->uthread_arg = u_arg;
@@ -259,17 +364,30 @@ extern int uthread_create(uthread_t *u_tid, int (*u_func)(void *), void *u_arg, 
 		fprintf(stderr, "uthread stack mem alloc failure !!");
 		return -1;
 	}
-	u_new->uthread_stack.ss_size = UTHREAD_DEFAULT_SSIZE;
 
+	u_new->uthread_stack.ss_size = UTHREAD_DEFAULT_SSIZE;
 
 	{
 		ksched_shared_info_t *ksched_info = &ksched_shared_info;
+
+		// Set correct value for uthread_priority based on scheduler in use
+		if (ksched_info->scheduler == GT_SCHED_PRIORITY) {
+			u_new->uthread_priority = DEFAULT_UTHREAD_PRIORITY;
+		}
+		else if (ksched_info->scheduler == GT_SCHED_CREDIT) {
+			// New threads are UNDER by default
+			u_new->uthread_priority = UTHREAD_CREDIT_UNDER;
+		}
 
 		gt_spin_lock(&ksched_info->ksched_lock);
 		u_new->uthread_tid = ksched_info->kthread_tot_uthreads++;
 		ksched_info->kthread_cur_uthreads++;
 		gt_spin_unlock(&ksched_info->ksched_lock);
 	}
+
+	#if DEBUG
+		fprintf(stderr, "uthread(%d) created successfully\n", u_new->uthread_tid);
+	#endif
 
 	/* XXX: ksched_find_target should be a function pointer */
 	kthread_runq = ksched_find_target(u_new);

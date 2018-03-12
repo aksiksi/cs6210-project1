@@ -26,6 +26,7 @@ kthread_context_t *kthread_cpu_map[GT_MAX_KTHREADS];
 
 /* kthread schedule information */
 ksched_shared_info_t ksched_shared_info;
+
 /**********************************************************************/
 /* kthread */
 extern int kthread_create(kthread_t *tid, int (*start_fun)(void *), void *arg);
@@ -35,10 +36,10 @@ static void kthread_exit();
 
 /**********************************************************************/
 /* kthread schedule */
-static inline void ksched_info_init(ksched_shared_info_t *ksched_info);
-static void ksched_announce_cosched_group();
-static void ksched_priority(int );
-static void ksched_cosched(int );
+static inline void ksched_info_init(ksched_shared_info_t *ksched_info, kthread_sched_t sched);
+void update_credit_balances(kthread_context_t *k_ctx);
+static void ksched_priority(int);
+static void ksched_cosched(int);
 extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *);
 
 /**********************************************************************/
@@ -74,22 +75,24 @@ int kthread_create(kthread_t *tid, int (*kthread_start_func)(void *), void *arg)
 	return -1;
 }
 
+/* This is the entry point for all newly created kthreads (with id > 0).
+ * Not that this function is executed in a new process via `clone` syscall.
+ */
 static int kthread_handler(void *arg)
 {
-#define k_ctx ((kthread_context_t *)arg)
+	#define k_ctx ((kthread_context_t *)arg)
 
-#if 0
-	printf("Thread to be scheduled on cpu\n");
-#endif
 	kthread_init(k_ctx);
-#if 0
-	printf("\nThread (tid : %u, pid : %u,  cpu : %d, cpu-apic-id %d) ready to run !!\n\n", 
-		k_ctx->tid, k_ctx->pid, k_ctx->cpuid, k_ctx->cpu_apic_id);
-#endif
+	
+	#if DEBUG
+		fprintf(stderr, "kthread (tid : %u, pid : %u,  cpu : %d, cpu-apic-id %d) ready to run !!\n",
+			k_ctx->tid, k_ctx->pid, k_ctx->cpuid, k_ctx->cpu_apic_id);
+	#endif
 
 	k_ctx->kthread_app_func(NULL);
-#undef k_ctx
-	// free(arg);
+	
+	#undef k_ctx
+	
 	return 0;
 }
 
@@ -103,8 +106,7 @@ static void kthread_init(kthread_context_t *k_ctx)
 	k_ctx->pid = syscall(SYS_getpid);
 	k_ctx->tid = syscall(SYS_gettid);
 
-	/* For priority co-scheduling */
-	k_ctx->kthread_sched_timer = ksched_priority;
+    k_ctx->kthread_sched_timer = ksched_priority;
 	k_ctx->kthread_sched_relay = ksched_cosched;
 
 	/* XXX: kthread runqueue balancing (TBD) */
@@ -115,7 +117,7 @@ static void kthread_init(kthread_context_t *k_ctx)
 	kthread_init_runqueue(&(k_ctx->krunqueue));
 
 	cpu_affinity_mask = (1 << k_ctx->cpuid);
-	sched_setaffinity(k_ctx->tid,sizeof(unsigned long),&cpu_affinity_mask);
+	sched_setaffinity(k_ctx->tid,sizeof(unsigned long),(cpu_set_t *)&cpu_affinity_mask);
 
 	sched_yield();
 
@@ -135,23 +137,15 @@ static inline void kthread_exit()
 /* kthread schedule */
 
 /* Initialize the ksched_shared_info */
-static inline void ksched_info_init(ksched_shared_info_t *ksched_info)
+static inline void ksched_info_init(ksched_shared_info_t *ksched_info, kthread_sched_t sched)
 {
 	gt_spinlock_init(&(ksched_info->ksched_lock));
 	gt_spinlock_init(&(ksched_info->uthread_init_lock));
 	gt_spinlock_init(&(ksched_info->__malloc_lock));
-	return;
-}
 
-static inline void KTHREAD_PRINT_SCHED_DEBUGINFO(kthread_context_t *k_ctx, char *str)
-{
-#if 0
-	struct timeval tv;
-	/* Thread-safe ?? */
-	gettimeofday(&tv, NULL);
-	printf("\n%s SIGNAL (cpu : %d, apic_id : %d) (ts : %d)\n",
-		str, k_ctx->cpuid, k_ctx->cpu_apic_id, tv.tv_usec);
-#endif
+	ksched_info->scheduler = sched;
+    ksched_info->num_ticks = 0;
+	
 	return;
 }
 
@@ -178,11 +172,133 @@ extern kthread_runqueue_t *ksched_find_target(uthread_struct_t *u_obj)
 	u_obj->cpu_id = kthread_cpu_map[target_cpu]->cpuid;
 	u_obj->last_cpu_id = kthread_cpu_map[target_cpu]->cpuid;
 
-#if 0
-	printf("Target uthread (id:%d, group:%d) : cpu(%d)\n", u_obj->uthread_tid, u_obj->uthread_gid, kthread_cpu_map[target_cpu]->cpuid);
-#endif
+    #if DEBUG
+        fprintf(stderr,
+                "Target uthread (id:%d, group:%d) : cpu(%d)\n",
+                u_obj->uthread_tid, u_obj->uthread_gid, kthread_cpu_map[target_cpu]->cpuid);
+    #endif
 
 	return(&(kthread_cpu_map[target_cpu]->krunqueue));
+}
+
+void update_credit_balances(kthread_context_t *k_ctx) {
+    /*
+     * Iterate over uthreads in the expired queue and add current timeslice credits.
+     *
+     * Also, perform credit deduction for CURRENT uthread
+     *
+     * TODO: if this does not work, try moving function to gt_pq?
+     */
+    kthread_runqueue_t *kthread_runq = &k_ctx->krunqueue;
+    runqueue_t *expires_runq = kthread_runq->expires_runq;
+    gt_spinlock_t *lock = &kthread_runq->kthread_runqlock;
+    uthread_head_t *u_head;
+	uthread_struct_t *u_thread;
+
+	// Bump credits for all uthreads in the active queue
+//	u_head = &kthread_runq->active_runq->prio_array[UTHREAD_CREDIT_UNDER].group[0];
+//	u_thread = TAILQ_FIRST(u_head);
+
+//	while (u_thread != NULL) {
+		// Bump up credit count for any active uthreads
+//        if (u_thread->uthread_state == UTHREAD_RUNNABLE)
+//            u_thread->uthread_credits += UTHREAD_DEFAULT_CREDITS;
+
+		// Get next uthread in queue
+//        u_thread = TAILQ_NEXT(u_thread, uthread_runq);
+//	}
+
+    // Get end of expired queue
+    u_head = &expires_runq->prio_array[UTHREAD_CREDIT_OVER].group[0];
+    u_thread = TAILQ_FIRST(u_head);
+
+    // Store pointer to original NEXT
+    uthread_struct_t *u_thread_next;
+
+    while (u_thread != NULL) {
+        // Keep pointer to NEXT
+        u_thread_next = TAILQ_NEXT(u_thread, uthread_runq);
+
+        // Bump up credit count of any expired uthreads
+		u_thread->uthread_credits = UTHREAD_DEFAULT_CREDITS;
+
+        // If OVER and credits > 0, move to active runq
+		// Remove from expired OVER queue
+		rem_from_runqueue(kthread_runq->expires_runq, lock, u_thread);
+
+		// Set to UNDER
+		u_thread->uthread_priority = UTHREAD_CREDIT_UNDER;
+
+		// Now as UNDER!
+		add_to_runqueue(kthread_runq->active_runq, lock, u_thread);
+
+        // Get next uthread in queue
+        u_thread = u_thread_next;
+    }
+}
+
+static void ksched_priority(int signo)
+{
+	/* [1] Tries to find the next schedulable uthread.
+	 * [2] Not Found - Sets uthread-select-criterion to NULL. Jump to [4].
+	 * [3] Found -  Sets uthread-select-criterion(if any) {Eg. uthread_group}.
+	 * [4] Announces uthread-select-criterion to other kthreads.
+	 * [5] Relays the scheduling signal to other kthreads. 
+	 * [RETURN] */
+	kthread_context_t *cur_k_ctx, *tmp_k_ctx;
+	int inx;
+
+	// kthread_block_signal(SIGVTALRM);
+	// kthread_block_signal(SIGUSR1);
+
+	cur_k_ctx = kthread_cpu_map[kthread_apic_id()];
+
+	#if DEBUG
+    if (cur_k_ctx->scheduler == GT_SCHED_PRIORITY)
+		fprintf(stderr, "kthread(%d) entered priority scheduler!\n", cur_k_ctx->cpuid);
+    else
+        fprintf(stderr, "kthread(%d) entered credit scheduler!\n", cur_k_ctx->cpuid);
+    #endif
+
+    // Perform credit updates for ALL kthreads once every N ticks
+//    if (ksched_shared_info.scheduler == GT_SCHED_CREDIT) {
+//        if (++ksched_shared_info.num_ticks == 10) {
+//            for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+//                if ((tmp_k_ctx = kthread_cpu_map[inx])) {
+//                    update_credit_balances(tmp_k_ctx);
+//                }
+//                else {
+//                    break;
+//                }
+//            }
+//
+//            ksched_shared_info.num_ticks = 0;
+//        }
+//    }
+
+	/* Relay the signal to all other virtual processors(kthreads) */
+	for(inx=0; inx<GT_MAX_KTHREADS; inx++)
+	{
+		/* XXX: We can avoid the last check (tmp to cur) by
+		 * temporarily marking cur as DONE. But chuck it !! */
+		if ((tmp_k_ctx = kthread_cpu_map[inx]) && (tmp_k_ctx != cur_k_ctx))
+		{
+			if(tmp_k_ctx->kthread_flags & KTHREAD_DONE)
+				continue;
+			/* tkill : send signal to specific threads */
+			syscall(__NR_tkill, tmp_k_ctx->tid, SIGUSR1);
+		}
+	}
+
+    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+	    uthread_schedule(&sched_find_best_uthread, 1);
+    else
+        uthread_schedule(&credit_find_best_uthread, 1);
+
+	// kthread_unblock_signal(SIGVTALRM);
+	// kthread_unblock_signal(SIGUSR1);
+
+	return;
 }
 
 static void ksched_cosched(int signal)
@@ -197,8 +313,6 @@ static void ksched_cosched(int signal)
 	 * [FOUND] Return. 
 	 * [[NOTE]] {uthread_select_criterion == match_uthread_group_id} */
 
-	kthread_context_t *cur_k_ctx;
-
 	// kthread_block_signal(SIGVTALRM);
 	// kthread_block_signal(SIGUSR1);
 
@@ -206,61 +320,10 @@ static void ksched_cosched(int signal)
 	 * picked by kernel for vtalrm signal.
 	 * USR1 signal has been relayed to it. */
 
-	cur_k_ctx = kthread_cpu_map[kthread_apic_id()];
-	KTHREAD_PRINT_SCHED_DEBUGINFO(cur_k_ctx, "RELAY(USR)");
-
-#ifdef CO_SCHED
-	uthread_schedule(&sched_find_best_uthread_group);
-#else
-	uthread_schedule(&sched_find_best_uthread);
-#endif
-
-	// kthread_unblock_signal(SIGVTALRM);
-	// kthread_unblock_signal(SIGUSR1);
-	return;
-}
-
-static void ksched_announce_cosched_group()
-{
-	/* Set the current running uthread_group  */
-	return;
-}
-
-static void ksched_priority(int signo)
-{
-	/* [1] Tries to find the next schedulable uthread.
-	 * [2] Not Found - Sets uthread-select-criterion to NULL. Jump to [4].
-	 * [3] Found -  Sets uthread-select-criterion(if any) {Eg. uthread_group}.
-	 * [4] Announces uthread-select-criterion to other kthreads.
-	 * [5] Relays the scheduling signal to other kthreads. 
-	 * [RETURN] */
-	kthread_context_t *cur_k_ctx, *tmp_k_ctx;
-	pid_t pid;
-	int inx;
-
-	// kthread_block_signal(SIGVTALRM);
-	// kthread_block_signal(SIGUSR1);
-
-	ksched_announce_cosched_group();
-
-	cur_k_ctx = kthread_cpu_map[kthread_apic_id()];
-	KTHREAD_PRINT_SCHED_DEBUGINFO(cur_k_ctx, "VTALRM");
-
-	/* Relay the signal to all other virtual processors(kthreads) */
-	for(inx=0; inx<GT_MAX_KTHREADS; inx++)
-	{
-		/* XXX: We can avoid the last check (tmp to cur) by
-		 * temporarily marking cur as DONE. But chuck it !! */
-		if((tmp_k_ctx = kthread_cpu_map[inx]) && (tmp_k_ctx != cur_k_ctx))
-		{
-			if(tmp_k_ctx->kthread_flags & KTHREAD_DONE)
-				continue;
-			/* tkill : send signal to specific threads */
-			syscall(__NR_tkill, tmp_k_ctx->tid, SIGUSR1);
-		}
-	}
-
-	uthread_schedule(&sched_find_best_uthread);
+    if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+        uthread_schedule(&sched_find_best_uthread, 1);
+    else
+        uthread_schedule(&credit_find_best_uthread, 1);
 
 	// kthread_unblock_signal(SIGVTALRM);
 	// kthread_unblock_signal(SIGUSR1);
@@ -273,6 +336,10 @@ static void ksched_priority(int signo)
  * All application cleanup must be done at the end of this function. */
 extern unsigned int gtthread_app_running;
 
+int kthread_done() {
+    return ksched_shared_info.kthread_tot_uthreads && !ksched_shared_info.kthread_cur_uthreads;
+}
+
 static void gtthread_app_start(void *arg)
 {
 	kthread_context_t *k_ctx;
@@ -280,66 +347,92 @@ static void gtthread_app_start(void *arg)
 	k_ctx = kthread_cpu_map[kthread_apic_id()];
 	assert((k_ctx->cpu_apic_id == kthread_apic_id()));
 
-#if 0
-	printf("kthread (%d) ready to schedule", k_ctx->cpuid);
-#endif
-	while(!(k_ctx->kthread_flags & KTHREAD_DONE))
+	#if DEBUG
+		fprintf(stderr, "kthread (%d) ready to schedule\n", k_ctx->cpuid);
+	#endif
+
+	// Current kthread keeps looping and scheduling uthreads until complete
+	// This is the main kthread loop (except for kthread 0)!
+	while(!kthread_done())
 	{
 		__asm__ __volatile__ ("pause\n");
-		if(sigsetjmp(k_ctx->kthread_env, 0))
+
+        if(sigsetjmp(k_ctx->kthread_env, 0))
 		{
 			/* siglongjmp to this point is done when there
 			 * are no more uthreads to schedule.*/
 			/* XXX: gtthread app cleanup has to be done. */
-			continue;
+            continue;
 		}
-		uthread_schedule(&sched_find_best_uthread);
+
+        // Only perform eager scheduling in PRIORITY mode!
+        if (k_ctx->scheduler == GT_SCHED_PRIORITY)
+		    uthread_schedule(&sched_find_best_uthread, 1);
+//        else
+//            uthread_schedule(&credit_find_best_uthread);
 	}
+
+//    fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
+    k_ctx->kthread_flags |= KTHREAD_DONE;
+	
 	kthread_exit();
 
 	return;
 }
 
-
-extern void gtthread_app_init()
+extern void gtthread_app_init(kthread_sched_t sched)
 {
 	kthread_context_t *k_ctx, *k_ctx_main;
 	kthread_t k_tid;
 	unsigned int num_cpus, inx;
-	
 
+    /* Num of logical processors (cpus/cores) */
+    #if DEBUG
+        num_cpus = 1;
+    #else
+       num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
+    #endif
+
+    fprintf(stderr, "Number of cores: %d\n", num_cpus);
+	
 	/* Initialize shared schedule information */
-	ksched_info_init(&ksched_shared_info);
+	ksched_info_init(&ksched_shared_info, sched);
 
 	/* kthread (virtual processor) on the first logical processor */
 	k_ctx_main = (kthread_context_t *)MALLOCZ_SAFE(sizeof(kthread_context_t));
 	k_ctx_main->cpuid = 0;
 	k_ctx_main->kthread_app_func = &gtthread_app_start;
+	k_ctx_main->scheduler = sched;
 	kthread_init(k_ctx_main);
 
-	kthread_init_vtalrm_timeslice();
+	// Setup timer and provide a timer handler
+	int err = kthread_init_vtalrm_timeslice();
+	if (err != 0)
+		fprintf(stderr, "Virtual timer setup failed!\n");
+	
 	kthread_install_sighandler(SIGVTALRM, k_ctx_main->kthread_sched_timer);
+
+	// Relays to other kthreads that it's time to schedule a uthread
 	kthread_install_sighandler(SIGUSR1, k_ctx_main->kthread_sched_relay);
 
-	/* Num of logical processors (cpus/cores) */
-	num_cpus = (int)sysconf(_SC_NPROCESSORS_CONF);
-#if 0
-	fprintf(stderr, "Number of cores : %d\n", num_cores);
-#endif
+//    fprintf(stderr, "Setup kthread(0) and timers!\n");
+
 	/* kthreads (virtual processors) on all other logical processors */
 	for(inx=1; inx<num_cpus; inx++)
 	{
 		k_ctx = (kthread_context_t *)MALLOCZ_SAFE(sizeof(kthread_context_t));
 		k_ctx->cpuid = inx;
 		k_ctx->kthread_app_func = &gtthread_app_start;
+		k_ctx->scheduler = sched;
+		
 		/* kthread_init called inside kthread_handler */
 		if(kthread_create(&k_tid, kthread_handler, (void *)k_ctx) < 0)
 		{
-			fprintf(stderr, "kthread creation failed (errno:%d)\n", errno );
+			fprintf(stderr, "kthread creation failed (errno:%d)\n", errno);
 			exit(0);
 		}
 
-		printf( "kthread(%d) created !!\n", inx);
+//		fprintf(stderr, "kthread(%d) created!!\n", inx);
 	}
 
 	{
@@ -367,6 +460,20 @@ yield_again:
 	return;
 }
 
+int kthreads_done() {
+    int done = ~0;
+	int inx;
+
+    for (inx = 0; inx < GT_MAX_KTHREADS; inx++) {
+        if (!kthread_cpu_map[inx])
+            break;
+
+        done = done & kthread_cpu_map[inx]->kthread_flags;
+    }
+
+    return (done & KTHREAD_DONE);
+}
+
 extern void gtthread_app_exit()
 {
 	/* gtthread_app_exit called by only main thread. */
@@ -376,7 +483,7 @@ extern void gtthread_app_exit()
 	k_ctx = kthread_cpu_map[kthread_apic_id()];
 	k_ctx->kthread_flags &= ~KTHREAD_DONE;
 
-	while(!(k_ctx->kthread_flags & KTHREAD_DONE))
+	while (!kthreads_done())
 	{
 		__asm__ __volatile__ ("pause\n");
 		if(sigsetjmp(k_ctx->kthread_env, 0))
@@ -386,8 +493,14 @@ extern void gtthread_app_exit()
 			/* XXX: gtthread app cleanup has to be done. */
 			continue;
 		}
-		uthread_schedule(&sched_find_best_uthread);
+
+//        kthread_install_sighandler(SIGVTALRM, k_ctx->kthread_sched_timer);
+
+        if (ksched_shared_info.scheduler == GT_SCHED_PRIORITY)
+		    uthread_schedule(&sched_find_best_uthread, 1);
 	}
+
+//    fprintf(stderr, "Quitting kthread (%d)\n", k_ctx->cpuid);
 
 	kthread_block_signal(SIGVTALRM);
 	kthread_block_signal(SIGUSR1);
